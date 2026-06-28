@@ -10,8 +10,9 @@
 #include "json.hpp"
 #include "llm.hpp"
 #include "tools.hpp"
- 
+
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
@@ -19,13 +20,14 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unistd.h>
 #include <vector>
- 
+
 namespace fs = std::filesystem;
- 
+
 namespace {
- 
+
 struct Config {
     std::string provider_name = "deepseek";
     std::string model;            // empty -> provider default
@@ -37,13 +39,13 @@ struct Config {
     bool once = false;
     std::string initial_prompt;
 };
- 
+
 constexpr char const* kHelp =
 R"(coding-agent - terminal coding agent (DeepSeek / Zhipu GLM)
- 
+
 USAGE
   coding-agent [OPTIONS] [--once "prompt"]
- 
+
 OPTIONS
   -p, --provider <name>   deepseek | glm            (default: deepseek)
   -m, --model <name>       model id, e.g. deepseek-chat, glm-4.5, glm-5.2
@@ -54,13 +56,13 @@ OPTIONS
       --max-iters <n>      agent loop cap            (default: 30)
       --once "prompt"       run one task then exit
   -h, --help               show this help
- 
+
 ENV
   DEEPSEEK_API_KEY         key for the deepseek provider
   ZHIPU_API_KEY            key for the glm provider
   CODING_AGENT_PROVIDER    default provider override
   CODING_AGENT_MODEL       default model override
- 
+
 REPL COMMANDS
   /help        show commands
   /model NAME  switch model
@@ -70,16 +72,16 @@ REPL COMMANDS
   /exit        quit
   .  on its own line (or Ctrl-D) to submit a prompt
 )";
- 
+
 bool is_tty() { return ::isatty(STDOUT_FILENO) != 0; }
- 
+
 void set_color(std::string_view code) {
     if (is_tty()) std::cout << "\033[" << code << 'm';
 }
 void reset_color() {
     if (is_tty()) std::cout << "\033[0m";
 }
- 
+
 void print_assistant(std::string_view text) {
     set_color("36");  // cyan
     std::cout << text;
@@ -115,7 +117,7 @@ void print_error(std::string_view msg) {
     std::cout << "[error] " << msg << '\n';
     reset_color();
 }
- 
+
 bool parse_args(int argc, char** argv, Config& cfg) {
     auto next = [&](int& i) -> std::optional<std::string> {
         if (i + 1 >= argc) return std::nullopt;
@@ -124,7 +126,7 @@ bool parse_args(int argc, char** argv, Config& cfg) {
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         auto grab = [&]() -> std::optional<std::string> { return next(i); };
- 
+
         if (a == "-h" || a == "--help") { std::cout << kHelp; std::exit(0); }
         else if (a == "-p" || a == "--provider") {
             if (auto v = grab()) cfg.provider_name = *v; else { std::cerr << "missing value for " << a << "\n"; return false; }
@@ -168,13 +170,13 @@ bool parse_args(int argc, char** argv, Config& cfg) {
     }
     return true;
 }
- 
+
 std::string resolve_api_key(const Config& cfg, const llm::Provider& p) {
     if (!cfg.api_key.empty()) return cfg.api_key;
     if (const char* k = std::getenv(p.api_key_env.c_str())) return k;
     return {};
 }
- 
+
 std::string build_system_prompt(const fs::path& root) {
     return std::format(
         "You are coding-agent, an autonomous software-engineering assistant running in a Linux "
@@ -198,14 +200,14 @@ std::string build_system_prompt(const fs::path& root) {
         "  8. Never invent file contents; read first when you need accuracy.\n",
         fs::weakly_canonical(root).string());
 }
- 
+
 // Run the agent loop for a single user turn. Returns final assistant text + done flag.
 struct TurnOutcome {
     std::string final_text;
     long prompt_tokens = 0;
     long completion_tokens = 0;
 };
- 
+
 TurnOutcome run_turn(http::Client& http, const llm::Provider& provider,
                      const Config& cfg, std::vector<llm::Message>& messages,
                      const json::Value& tools_json, const std::string& api_key) {
@@ -215,19 +217,46 @@ TurnOutcome run_turn(http::Client& http, const llm::Provider& provider,
         opts.model = cfg.model.empty() ? provider.default_model : cfg.model;
         opts.temperature = cfg.temperature;
         opts.max_tokens = cfg.max_tokens;
- 
-        llm::CompletionResult res = llm::chat_completion(
-            http, provider, opts, messages, tools_json, api_key);
+
+        // Outer retry loop for transient failures (network unreachable,
+        // connection refused, TLS handshake failed, timeout, 5xx, 429).
+        // The HTTP layer already retries 3x with >=30s backoff; this is the
+        // last line of defense that retries the whole completion call once
+        // more after those are exhausted, so a temporary outage doesn't kill
+        // the entire agent turn / session.
+        llm::CompletionResult res;
+        constexpr int kTurnRetries = 3;
+        for (int turn_attempt = 1; turn_attempt <= kTurnRetries; ++turn_attempt) {
+            try {
+                res = llm::chat_completion(
+                    http, provider, opts, messages, tools_json, api_key);
+                break;  // success
+            } catch (const std::exception& e) {
+                if (!llm::is_transient(e)) throw;
+                if (turn_attempt < kTurnRetries) {
+                    int wait = 30 * turn_attempt;
+                    set_color("33");
+                    std::cerr << std::format(
+                        "[retry] turn {}: transient LLM failure ({}); "
+                        "waiting {}s before retry {}/{}\n",
+                        iter + 1, e.what(), wait, turn_attempt + 1, kTurnRetries);
+                    reset_color();
+                    std::this_thread::sleep_for(std::chrono::seconds(wait));
+                } else {
+                    throw;  // give up after kTurnRetries
+                }
+            }
+        }
         out.prompt_tokens += res.prompt_tokens;
         out.completion_tokens += res.completion_tokens;
         messages.push_back(res.assistant);
- 
+
         if (res.assistant.tool_calls.empty()) {
             // No more tool calls — final answer (or stop).
             out.final_text = res.assistant.content.value_or("");
             return out;
         }
- 
+
         // Has tool calls: print assistant text (if any) then execute each.
         if (res.assistant.content && !res.assistant.content->empty()) {
             print_assistant(*res.assistant.content);
@@ -237,7 +266,7 @@ TurnOutcome run_turn(http::Client& http, const llm::Provider& provider,
             std::string result = tools::execute(tc.function_name, tc.arguments, cfg.root);
             print_result_preview(result);
             messages.push_back(llm::Message::tool_result(tc.id, tc.function_name, result));
- 
+
             if (tc.function_name == "finish") {
                 out.final_text = result;
                 return out;
@@ -247,13 +276,13 @@ TurnOutcome run_turn(http::Client& http, const llm::Provider& provider,
     out.final_text = "[agent hit iteration limit without calling finish]";
     return out;
 }
- 
+
 } // namespace
- 
+
 int main(int argc, char** argv) {
     Config cfg;
     if (!parse_args(argc, argv, cfg)) return 2;
- 
+
     // Resolve provider.
     llm::Provider provider;
     if (auto* p = llm::find_provider(cfg.provider_name)) {
@@ -262,30 +291,30 @@ int main(int argc, char** argv) {
         std::cerr << std::format("unknown provider '{}'. use deepseek|glm\n", cfg.provider_name);
         return 2;
     }
- 
+
     std::string api_key = resolve_api_key(cfg, provider);
     if (api_key.empty()) {
         std::cerr << std::format(
             "error: no API key. set ${} or pass --api-key.\n", provider.api_key_env);
         return 2;
     }
- 
+
     std::error_code ec;
     cfg.root = fs::weakly_canonical(cfg.root, ec);
     if (ec) {
         std::cerr << std::format("error: invalid root '{}': {}\n", cfg.root.string(), ec.message());
         return 2;
     }
- 
+
     http::Client http;
     const json::Value tools_json = tools::tool_schemas();
- 
+
     // Conversation history.
     std::vector<llm::Message> messages;
     messages.push_back(llm::Message::system(build_system_prompt(cfg.root)));
- 
+
     long total_prompt = 0, total_completion = 0;
- 
+
     if (cfg.once) {
         if (cfg.initial_prompt.empty()) {
             std::cerr << "error: --once requires a prompt.\n";
@@ -304,7 +333,7 @@ int main(int argc, char** argv) {
         }
         return 0;
     }
- 
+
     // Interactive REPL.
     std::cout << std::format("coding-agent  provider={}  model={}  root={}\n",
                              provider.name,
@@ -312,7 +341,7 @@ int main(int argc, char** argv) {
                              cfg.root.string());
     std::cout << "Type your prompt; submit with a line containing only '.', or Ctrl-D.\n";
     std::cout << "Commands: /help /model /provider /clear /tokens /exit\n\n";
- 
+
     std::string line;
     while (true) {
         set_color("35"); std::cout << "> " << std::flush; reset_color();
@@ -326,7 +355,7 @@ int main(int argc, char** argv) {
         }
         if (!got_any && std::cin.eof()) { std::cout << "\n"; break; }  // Ctrl-D
         if (prompt.empty()) continue;
- 
+
         // Strip a single leading '/' command.
         if (prompt.size() > 1 && prompt.front() == '/' && prompt.find('\n') == std::string::npos) {
             std::string cmd = prompt;
@@ -370,7 +399,7 @@ int main(int argc, char** argv) {
             std::cout << "[unknown command: " << cmd << "  (try /help)]\n";
             continue;
         }
- 
+
         messages.push_back(llm::Message::user(prompt));
         try {
             TurnOutcome out = run_turn(http, provider, cfg, messages, tools_json, api_key);

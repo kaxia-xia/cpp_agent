@@ -1,10 +1,10 @@
 // llm.hpp - chat-completion client for OpenAI-compatible providers
 // (DeepSeek, Zhipu GLM). Supports function/tool calling.
 #pragma once
- 
+
 #include "http.hpp"
 #include "json.hpp"
- 
+
 #include <algorithm>
 #include <format>
 #include <optional>
@@ -12,9 +12,9 @@
 #include <string>
 #include <string_view>
 #include <vector>
- 
+
 namespace llm {
- 
+
 struct Provider {
     std::string name;          // "deepseek" | "glm"
     std::string base_url;       // no trailing slash
@@ -22,7 +22,7 @@ struct Provider {
     std::string default_model;
     std::string label;          // human friendly
 };
- 
+
 inline std::vector<Provider> known_providers() {
     return {
         Provider{
@@ -41,7 +41,7 @@ inline std::vector<Provider> known_providers() {
         },
     };
 }
- 
+
 inline const Provider* find_provider(std::string_view name) {
     auto providers = known_providers();
     for (const auto& p : providers) {
@@ -54,20 +54,20 @@ inline const Provider* find_provider(std::string_view name) {
     }
     return nullptr;
 }
- 
+
 struct ToolCall {
     std::string id;
     std::string function_name;
     std::string arguments;  // raw JSON string
 };
- 
+
 struct Message {
     std::string role;                            // system | user | assistant | tool
     std::optional<std::string> content;
     std::optional<std::string> name;             // tool role: tool name
     std::optional<std::string> tool_call_id;     // tool role: originating call id
     std::vector<ToolCall> tool_calls;             // assistant role
- 
+
     static Message system(std::string s) {
         Message m; m.role = "system"; m.content = std::move(s); return m;
     }
@@ -83,7 +83,7 @@ struct Message {
         m.name = std::move(name); m.content = std::move(content); return m;
     }
 };
- 
+
 inline json::Value message_to_json(const Message& m) {
     json::Object obj;
     obj["role"] = json::Value{m.role};
@@ -115,13 +115,13 @@ inline json::Value message_to_json(const Message& m) {
     }
     return json::Value{std::move(obj)};
 }
- 
+
 struct CompletionOptions {
     std::string model;
     double temperature = 0.3;
     std::optional<int> max_tokens;
 };
- 
+
 struct CompletionResult {
     Message assistant;
     std::string finish_reason;
@@ -129,12 +129,39 @@ struct CompletionResult {
     long completion_tokens = 0;
     long total_tokens = 0;
 };
- 
+
 class LLMError : public std::runtime_error {
 public:
     explicit LLMError(std::string msg) : std::runtime_error(msg) {}
 };
- 
+
+// True if the error is a transport-level failure (network unreachable,
+// connection refused, TLS handshake failed, timeout) rather than an
+// API-level rejection (4xx). The agent loop uses this to decide whether
+// retrying the whole turn makes sense.
+//
+// Note: connection-layer retries already happen inside http::Client::post
+// (>= 3 retries, each >= 30s). If we get here, those have been exhausted.
+inline bool is_transient(const std::exception& e) {
+    const std::string msg = e.what();
+    // Markers produced by http::RequestError on exhausted transport retries.
+    if (dynamic_cast<const http::RequestError*>(&e) != nullptr) return true;
+    // Substring fallback in case the error gets re-wrapped.
+    if (msg.find("COULDNT_CONNECT")       != std::string::npos) return true;
+    if (msg.find("COULDNT_RESOLVE")       != std::string::npos) return true;
+    if (msg.find("OPERATION_TIMEDOUT")    != std::string::npos) return true;
+    if (msg.find("SSL_CONNECT_ERROR")     != std::string::npos) return true;
+    if (msg.find("SEND_ERROR")            != std::string::npos) return true;
+    if (msg.find("RECV_ERROR")            != std::string::npos) return true;
+    if (msg.find("HTTP request failed")   != std::string::npos) return true;
+    if (msg.find("after") != std::string::npos &&
+        msg.find("attempts") != std::string::npos) return true;
+    // 5xx and 429 are also transient server-side issues.
+    if (msg.find("HTTP 5") != std::string::npos) return true;
+    if (msg.find("HTTP 429") != std::string::npos) return true;
+    return false;
+}
+
 inline CompletionResult chat_completion(http::Client& http,
                                         const Provider& provider,
                                         const CompletionOptions& opts,
@@ -146,21 +173,21 @@ inline CompletionResult chat_completion(http::Client& http,
     req["temperature"] = json::Value{opts.temperature};
     if (opts.max_tokens) req["max_tokens"] = json::Value{*opts.max_tokens};
     req["stream"] = json::Value{false};
- 
+
     json::Array msgs;
     msgs.reserve(messages.size());
     for (const auto& m : messages) msgs.emplace_back(message_to_json(m));
     req["messages"] = json::Value{std::move(msgs)};
- 
+
     if (tools_json.is_array() && !tools_json.as_array().empty()) {
         req["tools"] = tools_json;
     }
- 
+
     const std::string url = std::format("{}/chat/completions", provider.base_url);
     const std::string body = json::Value{req}.serialize();
- 
+
     http::Response resp = http.post_json(url, body, api_key);
- 
+
     if (resp.status < 200 || resp.status >= 300) {
         // Try to surface API error message.
         std::string detail;
@@ -177,7 +204,7 @@ inline CompletionResult chat_completion(http::Client& http,
         } catch (...) { detail = std::format(" body={}", resp.body); }
         throw LLMError(std::format("HTTP {} from {}{}", resp.status, provider.label, detail));
     }
- 
+
     json::Value v;
     try {
         v = json::parse(resp.body);
@@ -185,7 +212,7 @@ inline CompletionResult chat_completion(http::Client& http,
         throw LLMError(std::format("failed to parse response JSON: {}; body head: {}",
                                    e.what(), resp.body.substr(0, 200)));
     }
- 
+
     CompletionResult result;
     if (v.contains("usage") && v["usage"].is_object()) {
         const auto& u = v["usage"];
@@ -193,26 +220,26 @@ inline CompletionResult chat_completion(http::Client& http,
         result.completion_tokens = static_cast<long>(u.contains("completion_tokens") ? u["completion_tokens"].as_number() : 0);
         result.total_tokens = static_cast<long>(u.contains("total_tokens") ? u["total_tokens"].as_number() : 0);
     }
- 
+
     if (!v.contains("choices") || !v["choices"].is_array() || v["choices"].as_array().empty()) {
         throw LLMError(std::format("response missing choices: {}", resp.body.substr(0, 300)));
     }
     const auto& choice = v["choices"].as_array().front();
     if (choice.contains("finish_reason") && choice["finish_reason"].is_string())
         result.finish_reason = choice["finish_reason"].as_string();
- 
+
     if (!choice.contains("message") || !choice["message"].is_object()) {
         throw LLMError(std::format("choice missing message: {}", resp.body.substr(0, 300)));
     }
     const auto& msg = choice["message"];
- 
+
     Message am;
     am.role = msg.contains("role") && msg["role"].is_string() ? msg["role"].as_string() : "assistant";
     if (msg.contains("content")) {
         if (msg["content"].is_string()) am.content = msg["content"].as_string();
         else if (msg["content"].is_null()) am.content = std::string{};
     }
- 
+
     if (msg.contains("tool_calls") && msg["tool_calls"].is_array()) {
         for (const auto& tc : msg["tool_calls"].as_array()) {
             ToolCall call;
@@ -229,9 +256,9 @@ inline CompletionResult chat_completion(http::Client& http,
             am.tool_calls.push_back(std::move(call));
         }
     }
- 
+
     result.assistant = std::move(am);
     return result;
 }
- 
+
 } // namespace llm
