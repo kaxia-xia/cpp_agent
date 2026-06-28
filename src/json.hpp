@@ -1,7 +1,7 @@
 // json.hpp - minimal self-contained JSON value, parser and serializer.
 // No external dependencies; C++20.
 #pragma once
- 
+
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -19,21 +19,120 @@
 #include <utility>
 #include <variant>
 #include <vector>
- 
+
 namespace json {
- 
+
+// ---- UTF-8 sanitizer ----
+// Walks the input as a byte stream and replaces any invalid UTF-8 sequence
+// (lone continuation bytes, truncated multi-byte starts, overlong encodings,
+// out-of-range code points, malformed surrogate halves) with the Unicode
+// replacement character U+FFFD. The output is always valid UTF-8.
+//
+// This is essential when feeding strings that originated from shell output,
+// arbitrary file contents, or terminal control sequences to an LLM API:
+// those bytes may not be valid UTF-8, and server-side JSON parsers
+// (e.g. Jackson used by Zhipu GLM) reject invalid UTF-8 with HTTP 400.
+namespace utf8 {
+
+inline std::string sanitize(std::string_view in) {
+    std::string out;
+    out.reserve(in.size());
+    const auto* p = reinterpret_cast<const unsigned char*>(in.data());
+    const size_t n = in.size();
+    size_t i = 0;
+
+    // Append U+FFFD (EF BF BD) — the Unicode replacement character.
+    const auto push_replacement = [&]() {
+        out.push_back(static_cast<char>(0xEF));
+        out.push_back(static_cast<char>(0xBF));
+        out.push_back(static_cast<char>(0xBD));
+    };
+
+    while (i < n) {
+        unsigned char b = p[i];
+
+        // ASCII fast path: 0x00-0x7F is always valid.
+        if (b <= 0x7F) {
+            out.push_back(static_cast<char>(b));
+            ++i;
+            continue;
+        }
+
+        // Determine expected sequence length and decode code point.
+        unsigned cp = 0;
+        int expected = 0;
+        if (b >= 0xC2 && b <= 0xDF)        { cp = b & 0x1F; expected = 1; }
+        else if (b >= 0xE0 && b <= 0xEF)  { cp = b & 0x0F; expected = 2; }
+        else if (b >= 0xF0 && b <= 0xF4)  { cp = b & 0x07; expected = 3; }
+        else {
+            // 0x80-0xBF (lone continuation), 0xC0/0xC1 (overlong), 0xF5-0xFF (invalid).
+            push_replacement();
+            ++i;
+            continue;
+        }
+
+        // Try to consume the expected continuation bytes.
+        if (i + expected >= n) {
+            // Truncated sequence: not enough bytes left.
+            push_replacement();
+            ++i;
+            continue;
+        }
+        bool valid = true;
+        unsigned decoded = cp;
+        for (int k = 1; k <= expected; ++k) {
+            unsigned char cb = p[i + k];
+            if (cb < 0x80 || cb > 0xBF) { valid = false; break; }
+            decoded = (decoded << 6) | (cb & 0x3F);
+        }
+        if (!valid) {
+            push_replacement();
+            ++i;
+            continue;
+        }
+
+        // Reject overlong encodings and surrogate halves.
+        if (expected == 1) {
+            // 2-byte: decoded must be >= 0x80. (Always true since b >= 0xC2.)
+        } else if (expected == 2) {
+            // 3-byte: reject overlong (decoded < 0x800) and surrogate halves (0xD800-0xDFFF).
+            if (decoded < 0x800 || (decoded >= 0xD800 && decoded <= 0xDFFF)) {
+                push_replacement();
+                ++i;
+                continue;
+            }
+        } else if (expected == 3) {
+            // 4-byte: reject overlong (decoded < 0x10000) and out-of-range (> 0x10FFFF).
+            if (decoded < 0x10000 || decoded > 0x10FFFF) {
+                push_replacement();
+                ++i;
+                continue;
+            }
+        }
+
+        // Valid multi-byte sequence: copy bytes verbatim.
+        for (int k = 0; k <= expected; ++k) {
+            out.push_back(static_cast<char>(p[i + k]));
+        }
+        i += expected + 1;
+    }
+    return out;
+}
+
+} // namespace utf8
+
 class Value;
 using Object = std::map<std::string, Value, std::less<>>;
 using Array  = std::vector<Value>;
- 
+
 class Value {
 public:
     enum class Type { Null, Bool, Number, String, Array, Object };
- 
+
 private:
     Type type_{Type::Null};
     std::variant<std::monostate, bool, double, std::string, Array, Object> data_{};
- 
+
 public:
     Value() = default;
     Value(std::nullptr_t) : type_(Type::Null) {}
@@ -47,7 +146,7 @@ public:
     Value(std::string s) : type_(Type::String), data_(std::move(s)) {}
     Value(Array a) : type_(Type::Array), data_(std::move(a)) {}
     Value(Object o) : type_(Type::Object), data_(std::move(o)) {}
- 
+
     [[nodiscard]] Type type() const noexcept { return type_; }
     [[nodiscard]] bool is_null() const noexcept { return type_ == Type::Null; }
     [[nodiscard]] bool is_bool() const noexcept { return type_ == Type::Bool; }
@@ -55,14 +154,14 @@ public:
     [[nodiscard]] bool is_string() const noexcept { return type_ == Type::String; }
     [[nodiscard]] bool is_array() const noexcept { return type_ == Type::Array; }
     [[nodiscard]] bool is_object() const noexcept { return type_ == Type::Object; }
- 
+
     [[nodiscard]] bool as_bool() const { return std::get<bool>(data_); }
     [[nodiscard]] double as_number() const { return std::get<double>(data_); }
     [[nodiscard]] long long as_integer() const { return static_cast<long long>(std::get<double>(data_)); }
     [[nodiscard]] const std::string& as_string() const { return std::get<std::string>(data_); }
     [[nodiscard]] const Array& as_array() const { return std::get<Array>(data_); }
     [[nodiscard]] const Object& as_object() const { return std::get<Object>(data_); }
- 
+
     // Convenience: as_integer but tolerant of string-encoded numbers.
     [[nodiscard]] long long to_integer() const {
         if (is_number()) return as_integer();
@@ -73,7 +172,7 @@ public:
         }
         return 0;
     }
- 
+
     // Object access helpers.
     const Value& operator[](std::string_view key) const {
         static const Value null_value{};
@@ -86,17 +185,22 @@ public:
         if (!is_object()) return false;
         return as_object().find(key) != as_object().end();
     }
- 
+
     [[nodiscard]] std::string serialize(bool pretty = false, int indent = 2) const {
         std::string out;
         write(out, *this, pretty ? indent : -1, 0);
         return out;
     }
- 
+
 private:
     static void write_str(std::string& out, std::string_view s) {
+        // Sanitize first: replace any invalid UTF-8 byte sequence with U+FFFD.
+        // Without this, raw bytes from shell output / arbitrary file contents
+        // would be emitted as-is and rejected by strict JSON parsers (e.g.
+        // Zhipu GLM's Jackson backend returns HTTP 400 "Invalid UTF-8 ...").
+        std::string clean = utf8::sanitize(s);
         out.push_back('"');
-        for (unsigned char c : s) {
+        for (unsigned char c : clean) {
             switch (c) {
                 case '"':  out += "\\\""; break;
                 case '\\': out += "\\\\"; break;
@@ -115,14 +219,14 @@ private:
         }
         out.push_back('"');
     }
- 
+
     static void write(std::string& out, const Value& v, int indent, int depth) {
         const auto pad = [&](int d) {
             if (indent < 0) return;
             for (int i = 0; i < indent * d; ++i) out.push_back(' ');
         };
         const auto nl = [&]() { if (indent >= 0) out.push_back('\n'); };
- 
+
         switch (v.type_) {
             case Type::Null:   out += "null"; return;
             case Type::Bool:   out += (v.as_bool() ? "true" : "false"); return;
@@ -176,20 +280,20 @@ private:
         }
     }
 };
- 
+
 // ---- Parser (recursive descent) ----
 class ParseError : public std::runtime_error {
 public:
     explicit ParseError(std::string msg) : std::runtime_error(msg) {}
 };
- 
+
 class Parser {
     std::string_view src_;
     size_t pos_{0};
- 
+
 public:
     explicit Parser(std::string_view s) : src_(s) {}
- 
+
     Value parse() {
         skip_ws();
         Value v = parse_value();
@@ -198,16 +302,16 @@ public:
             throw ParseError(std::format("trailing data at offset {}", pos_));
         return v;
     }
- 
+
 private:
     [[noreturn]] void fail(std::string_view msg) const {
         throw ParseError(std::format("json parse error at {}: {}", pos_, msg));
         __builtin_unreachable();
     }
- 
+
     char peek() const { return pos_ < src_.size() ? src_[pos_] : '\0'; }
     char get() { return pos_ < src_.size() ? src_[pos_++] : '\0'; }
- 
+
     void skip_ws() {
         while (pos_ < src_.size()) {
             char c = src_[pos_];
@@ -215,7 +319,7 @@ private:
             else break;
         }
     }
- 
+
     Value parse_value() {
         skip_ws();
         char c = peek();
@@ -231,13 +335,13 @@ private:
                 fail("unexpected character");
         }
     }
- 
+
     Value parse_literal(std::string_view lit, Value v) {
         if (src_.substr(pos_, lit.size()) != lit) fail("invalid literal");
         pos_ += lit.size();
         return v;
     }
- 
+
     Value parse_number() {
         size_t start = pos_;
         if (peek() == '-') ++pos_;
@@ -252,7 +356,7 @@ private:
             return Value{d};
         } catch (...) { fail("invalid number"); }
     }
- 
+
     std::string parse_string() {
         if (get() != '"') fail("expected string");
         std::string out;
@@ -293,7 +397,7 @@ private:
         }
         return out;
     }
- 
+
     static void encode_utf8(std::string& out, unsigned cp) {
         if (cp <= 0x7F) { out.push_back(static_cast<char>(cp)); }
         else if (cp <= 0x7FF) {
@@ -310,7 +414,7 @@ private:
             out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
         }
     }
- 
+
     Value parse_array() {
         if (get() != '[') fail("expected '['");
         Array a;
@@ -326,7 +430,7 @@ private:
         }
         return Value{std::move(a)};
     }
- 
+
     Value parse_object() {
         if (get() != '{') fail("expected '{'");
         Object o;
@@ -347,9 +451,9 @@ private:
         return Value{std::move(o)};
     }
 };
- 
+
 inline Value parse(std::string_view s) { return Parser{s}.parse(); }
- 
+
 // ---- Builder helpers ----
 template <std::convertible_to<Value> T>
 Value make_array(std::initializer_list<T> items) {
@@ -358,5 +462,5 @@ Value make_array(std::initializer_list<T> items) {
     for (const auto& it : items) a.emplace_back(it);
     return Value{std::move(a)};
 }
- 
+
 } // namespace json
