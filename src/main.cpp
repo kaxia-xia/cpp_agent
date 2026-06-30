@@ -9,6 +9,7 @@
 #include "http.hpp"
 #include "json.hpp"
 #include "llm.hpp"
+#include "markdown.hpp"
 #include "tools.hpp"
 
 #include <algorithm>
@@ -30,12 +31,12 @@ namespace {
 
 struct Config {
     std::string provider_name = "deepseek";
-    std::string model;            // empty -> provider default
-    std::string api_key;          // explicit override
+    std::string model;
+    std::string api_key;
     fs::path root = fs::current_path();
     double temperature = 0.3;
     std::optional<int> max_tokens;
-    int max_iterations = 30;
+    int max_iterations = 100;
     bool once = false;
     std::string initial_prompt;
 };
@@ -48,12 +49,12 @@ USAGE
 
 OPTIONS
   -p, --provider <name>   deepseek | glm            (default: deepseek)
-  -m, --model <name>       model id, e.g. deepseek-chat, glm-4.5, glm-5.2
+  -m, --model <name>       model id, e.g. deepseek-chat, glm-4.5
       --api-key <key>      API key (else read from env, see below)
   -r, --root <dir>         workspace root            (default: cwd)
   -t, --temperature <f>    0.0 - 2.0                 (default: 0.3)
       --max-tokens <n>     max output tokens
-      --max-iters <n>      agent loop cap            (default: 30)
+      --max-iters <n>      agent loop cap            (default: 100)
       --once "prompt"       run one task then exit
   -h, --help               show this help
 
@@ -82,14 +83,40 @@ void reset_color() {
     if (is_tty()) std::cout << "\033[0m";
 }
 
-void print_assistant(std::string_view text) {
-    set_color("36");  // cyan
-    std::cout << text;
-    reset_color();
-    if (!text.empty() && text.back() != '\n') std::cout << '\n';
-}
-void print_tool(std::string_view name, std::string_view args) {
-    set_color("33");  // yellow
+// Streaming-aware printer: renders markdown incrementally as text arrives.
+struct StreamPrinter {
+    std::string buffer;
+    bool in_code_block = false;
+
+    void feed(std::string_view text) {
+        for (char c : text) {
+            buffer.push_back(c);
+            if (buffer.size() >= 3) {
+                std::string end = buffer.substr(buffer.size() - 3);
+                if (end == "```") in_code_block = !in_code_block;
+            }
+            if (c == '\n' && !in_code_block && buffer.size() > 1) {
+                auto last_newline = buffer.find_last_of('\n', buffer.size() - 2);
+                if (last_newline != std::string::npos) {
+                    std::string to_print(buffer.begin(), buffer.begin() + static_cast<long>(last_newline) + 1);
+                    std::string rest(buffer.begin() + static_cast<long>(last_newline) + 1, buffer.end());
+                    markdown::render(to_print);
+                    buffer = rest;
+                }
+            }
+        }
+    }
+
+    void flush() {
+        if (!buffer.empty()) {
+            markdown::render(buffer);
+            buffer.clear();
+        }
+    }
+};
+
+void print_tool_call(std::string_view name, std::string_view args) {
+    set_color("33");
     std::cout << "[tool] " << name;
     if (!args.empty()) {
         std::string a(args);
@@ -99,11 +126,11 @@ void print_tool(std::string_view name, std::string_view args) {
     std::cout << '\n';
     reset_color();
 }
-void print_result_preview(std::string_view result) {
-    set_color("2");  // dim
+
+void print_tool_result(std::string_view result) {
+    set_color("2");
     std::string r(result);
     std::string preview = r.size() > 400 ? (r.substr(0, 400) + "...") : r;
-    // indent each line
     std::string line;
     for (char c : preview) {
         if (c == '\n') { std::cout << "    " << line << '\n'; line.clear(); }
@@ -112,8 +139,9 @@ void print_result_preview(std::string_view result) {
     if (!line.empty()) std::cout << "    " << line << '\n';
     reset_color();
 }
+
 void print_error(std::string_view msg) {
-    set_color("31");  // red
+    set_color("31");
     std::cout << "[error] " << msg << '\n';
     reset_color();
 }
@@ -158,12 +186,10 @@ bool parse_args(int argc, char** argv, Config& cfg) {
         } else if (a.rfind("--", 0) == 0) {
             std::cerr << "unknown option: " << a << "\n"; return false;
         } else {
-            // positional: treat as initial prompt (implies --once)
             cfg.initial_prompt = a;
             cfg.once = true;
         }
     }
-    // env defaults
     if (const char* p = std::getenv("CODING_AGENT_PROVIDER")) cfg.provider_name = p;
     if (cfg.model.empty()) {
         if (const char* m = std::getenv("CODING_AGENT_MODEL")) cfg.model = m;
@@ -201,7 +227,6 @@ std::string build_system_prompt(const fs::path& root) {
         fs::weakly_canonical(root).string());
 }
 
-// Run the agent loop for a single user turn. Returns final assistant text + done flag.
 struct TurnOutcome {
     std::string final_text;
     long prompt_tokens = 0;
@@ -212,65 +237,117 @@ TurnOutcome run_turn(http::Client& http, const llm::Provider& provider,
                      const Config& cfg, std::vector<llm::Message>& messages,
                      const json::Value& tools_json, const std::string& api_key) {
     TurnOutcome out;
+
+    std::string last_fingerprint;
+    int same_streak = 0;
+    constexpr int kMaxSameStreak = 3;
+
     for (int iter = 0; iter < cfg.max_iterations; ++iter) {
         llm::CompletionOptions opts;
         opts.model = cfg.model.empty() ? provider.default_model : cfg.model;
         opts.temperature = cfg.temperature;
         opts.max_tokens = cfg.max_tokens;
 
-        // Outer retry loop for transient failures (network unreachable,
-        // connection refused, TLS handshake failed, timeout, 5xx, 429).
-        // The HTTP layer already retries 3x with >=30s backoff; this is the
-        // last line of defense that retries the whole completion call once
-        // more after those are exhausted, so a temporary outage doesn't kill
-        // the entire agent turn / session.
+        // Show provider prefix.
+        set_color("2");
+        std::cerr << std::format("[{}] ", provider.label);
+        reset_color();
+        std::cerr << std::flush;
+
         llm::CompletionResult res;
         constexpr int kTurnRetries = 3;
+        StreamPrinter printer;
+        bool has_tool_calls = false;
+
         for (int turn_attempt = 1; turn_attempt <= kTurnRetries; ++turn_attempt) {
             try {
-                res = llm::chat_completion(
-                    http, provider, opts, messages, tools_json, api_key);
-                break;  // success
+                res = llm::chat_completion_stream(
+                    http, provider, opts, messages, tools_json, api_key,
+                    [&](std::string_view text_delta,
+                        const std::vector<llm::ToolCall>& tool_calls_so_far) {
+                        // Show text as it streams.
+                        if (!text_delta.empty()) {
+                            printer.feed(text_delta);
+                        }
+                        // If tool calls appeared in the stream, show them immediately.
+                        if (!tool_calls_so_far.empty()) {
+                            has_tool_calls = true;
+                        }
+                    });
+                break;
             } catch (const std::exception& e) {
                 if (!llm::is_transient(e)) throw;
                 if (turn_attempt < kTurnRetries) {
                     int wait = 30 * turn_attempt;
                     set_color("33");
                     std::cerr << std::format(
-                        "[retry] turn {}: transient LLM failure ({}); "
+                        "\n[retry] iter {}: transient failure ({}); "
                         "waiting {}s before retry {}/{}\n",
                         iter + 1, e.what(), wait, turn_attempt + 1, kTurnRetries);
                     reset_color();
                     std::this_thread::sleep_for(std::chrono::seconds(wait));
                 } else {
-                    throw;  // give up after kTurnRetries
+                    throw;
                 }
             }
         }
+
+        printer.flush();
+        std::cout << std::flush;
+
         out.prompt_tokens += res.prompt_tokens;
         out.completion_tokens += res.completion_tokens;
         messages.push_back(res.assistant);
 
         if (res.assistant.tool_calls.empty()) {
-            // No more tool calls — final answer (or stop).
             out.final_text = res.assistant.content.value_or("");
+            std::cout << '\n';
             return out;
         }
 
-        // Has tool calls: print assistant text (if any) then execute each.
-        if (res.assistant.content && !res.assistant.content->empty()) {
-            print_assistant(*res.assistant.content);
-        }
+        // Print tool calls and execute them.
+        std::cout << '\n';
+        std::string fingerprint;
+        fingerprint.reserve(64);
         for (const auto& tc : res.assistant.tool_calls) {
-            print_tool(tc.function_name, tc.arguments);
+            fingerprint += tc.function_name;
+            fingerprint += '|';
+            fingerprint += tc.arguments;
+            fingerprint += '\x1f';
+        }
+        if (fingerprint == last_fingerprint) {
+            ++same_streak;
+        } else {
+            same_streak = 1;
+            last_fingerprint = fingerprint;
+        }
+
+        for (const auto& tc : res.assistant.tool_calls) {
+            print_tool_call(tc.function_name, tc.arguments);
             std::string result = tools::execute(tc.function_name, tc.arguments, cfg.root);
-            print_result_preview(result);
+            print_tool_result(result);
             messages.push_back(llm::Message::tool_result(tc.id, tc.function_name, result));
 
             if (tc.function_name == "finish") {
                 out.final_text = result;
                 return out;
             }
+        }
+
+        if (same_streak >= kMaxSameStreak) {
+            set_color("33");
+            std::cerr << std::format(
+                "[warn] agent appears stuck: identical tool calls repeated "
+                "{} times in a row at iter {}/{}. Breaking early.\n",
+                same_streak, iter + 1, cfg.max_iterations);
+            reset_color();
+            out.final_text = std::format(
+                "[agent stopped: identical tool calls repeated {} times "
+                "without making progress. Last tool: {}. "
+                "Consider rephrasing the task or raising --max-iters.]",
+                same_streak,
+                res.assistant.tool_calls.front().function_name);
+            return out;
         }
     }
     out.final_text = "[agent hit iteration limit without calling finish]";
@@ -283,7 +360,6 @@ int main(int argc, char** argv) {
     Config cfg;
     if (!parse_args(argc, argv, cfg)) return 2;
 
-    // Resolve provider.
     llm::Provider provider;
     if (auto* p = llm::find_provider(cfg.provider_name)) {
         provider = *p;
@@ -309,7 +385,6 @@ int main(int argc, char** argv) {
     http::Client http;
     const json::Value tools_json = tools::tool_schemas();
 
-    // Conversation history.
     std::vector<llm::Message> messages;
     messages.push_back(llm::Message::system(build_system_prompt(cfg.root)));
 
@@ -325,7 +400,6 @@ int main(int argc, char** argv) {
             TurnOutcome out = run_turn(http, provider, cfg, messages, tools_json, api_key);
             total_prompt += out.prompt_tokens;
             total_completion += out.completion_tokens;
-            print_assistant(out.final_text);
             std::cerr << std::format("\n[tokens: in={}, out={}]\n", total_prompt, total_completion);
         } catch (const std::exception& e) {
             print_error(e.what());
@@ -334,7 +408,6 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    // Interactive REPL.
     std::cout << std::format("coding-agent  provider={}  model={}  root={}\n",
                              provider.name,
                              cfg.model.empty() ? provider.default_model : cfg.model,
@@ -353,10 +426,9 @@ int main(int argc, char** argv) {
             prompt += line;
             got_any = true;
         }
-        if (!got_any && std::cin.eof()) { std::cout << "\n"; break; }  // Ctrl-D
+        if (!got_any && std::cin.eof()) { std::cout << "\n"; break; }
         if (prompt.empty()) continue;
 
-        // Strip a single leading '/' command.
         if (prompt.size() > 1 && prompt.front() == '/' && prompt.find('\n') == std::string::npos) {
             std::string cmd = prompt;
             if (cmd == "/exit" || cmd == "/quit") break;
@@ -405,13 +477,9 @@ int main(int argc, char** argv) {
             TurnOutcome out = run_turn(http, provider, cfg, messages, tools_json, api_key);
             total_prompt += out.prompt_tokens;
             total_completion += out.completion_tokens;
-            if (!out.final_text.empty()) {
-                print_assistant(out.final_text);
-            }
             std::cout << std::format("[{} in / {} out]\n", out.prompt_tokens, out.completion_tokens);
         } catch (const llm::LLMError& e) {
             print_error(e.what());
-            // Drop the user message so the conversation stays consistent.
             if (!messages.empty() && messages.back().role == "user") messages.pop_back();
         } catch (const std::exception& e) {
             print_error(e.what());

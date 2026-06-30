@@ -1,12 +1,15 @@
 // llm.hpp - chat-completion client for OpenAI-compatible providers
-// (DeepSeek, Zhipu GLM). Supports function/tool calling.
+// (DeepSeek, Zhipu GLM). Supports function/tool calling with streaming.
 #pragma once
 
 #include "http.hpp"
 #include "json.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <format>
+#include <functional>
+#include <iostream>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -16,29 +19,17 @@
 namespace llm {
 
 struct Provider {
-    std::string name;          // "deepseek" | "glm"
-    std::string base_url;       // no trailing slash
-    std::string api_key_env;    // env var holding the API key
+    std::string name;
+    std::string base_url;
+    std::string api_key_env;
     std::string default_model;
-    std::string label;          // human friendly
+    std::string label;
 };
 
 inline std::vector<Provider> known_providers() {
     return {
-        Provider{
-            "deepseek",
-            "https://api.deepseek.com/v1",
-            "DEEPSEEK_API_KEY",
-            "deepseek-chat",
-            "DeepSeek",
-        },
-        Provider{
-            "glm",
-            "https://open.bigmodel.cn/api/paas/v4",
-            "ZHIPU_API_KEY",
-            "glm-4.5",
-            "Zhipu GLM",
-        },
+        Provider{"deepseek", "https://api.deepseek.com/v1", "DEEPSEEK_API_KEY", "deepseek-chat", "DeepSeek"},
+        Provider{"glm", "https://open.bigmodel.cn/api/paas/v4", "ZHIPU_API_KEY", "glm-4-flash", "Zhipu GLM"},
     };
 }
 
@@ -46,7 +37,6 @@ inline const Provider* find_provider(std::string_view name) {
     auto providers = known_providers();
     for (const auto& p : providers) {
         if (p.name == name) {
-            // Returning pointer into local vector is unsafe; copy out.
             static thread_local Provider stash;
             stash = p;
             return &stash;
@@ -58,15 +48,15 @@ inline const Provider* find_provider(std::string_view name) {
 struct ToolCall {
     std::string id;
     std::string function_name;
-    std::string arguments;  // raw JSON string
+    std::string arguments;
 };
 
 struct Message {
-    std::string role;                            // system | user | assistant | tool
+    std::string role;
     std::optional<std::string> content;
-    std::optional<std::string> name;             // tool role: tool name
-    std::optional<std::string> tool_call_id;     // tool role: originating call id
-    std::vector<ToolCall> tool_calls;             // assistant role
+    std::optional<std::string> name;
+    std::optional<std::string> tool_call_id;
+    std::vector<ToolCall> tool_calls;
 
     static Message system(std::string s) {
         Message m; m.role = "system"; m.content = std::move(s); return m;
@@ -89,7 +79,6 @@ inline json::Value message_to_json(const Message& m) {
     obj["role"] = json::Value{m.role};
     if (m.content) obj["content"] = json::Value{*m.content};
     else if (m.role == "assistant") {
-        // OpenAI requires content to be present (may be empty string) when tool_calls exist.
         if (!m.tool_calls.empty()) obj["content"] = json::Value{""};
     } else if (m.role != "assistant") {
         obj["content"] = json::Value{""};
@@ -105,8 +94,6 @@ inline json::Value message_to_json(const Message& m) {
             tc_obj["type"] = json::Value{"function"};
             json::Object fn;
             fn["name"] = json::Value{tc.function_name};
-            // arguments must be a JSON string per OpenAI spec.
-            // Validate parseability; if invalid, wrap as raw string.
             fn["arguments"] = json::Value{tc.arguments};
             tc_obj["function"] = json::Value{std::move(fn)};
             tcs.emplace_back(std::move(tc_obj));
@@ -135,18 +122,9 @@ public:
     explicit LLMError(std::string msg) : std::runtime_error(msg) {}
 };
 
-// True if the error is a transport-level failure (network unreachable,
-// connection refused, TLS handshake failed, timeout) rather than an
-// API-level rejection (4xx). The agent loop uses this to decide whether
-// retrying the whole turn makes sense.
-//
-// Note: connection-layer retries already happen inside http::Client::post
-// (>= 3 retries, each >= 30s). If we get here, those have been exhausted.
 inline bool is_transient(const std::exception& e) {
     const std::string msg = e.what();
-    // Markers produced by http::RequestError on exhausted transport retries.
     if (dynamic_cast<const http::RequestError*>(&e) != nullptr) return true;
-    // Substring fallback in case the error gets re-wrapped.
     if (msg.find("COULDNT_CONNECT")       != std::string::npos) return true;
     if (msg.find("COULDNT_RESOLVE")       != std::string::npos) return true;
     if (msg.find("OPERATION_TIMEDOUT")    != std::string::npos) return true;
@@ -156,23 +134,32 @@ inline bool is_transient(const std::exception& e) {
     if (msg.find("HTTP request failed")   != std::string::npos) return true;
     if (msg.find("after") != std::string::npos &&
         msg.find("attempts") != std::string::npos) return true;
-    // 5xx and 429 are also transient server-side issues.
     if (msg.find("HTTP 5") != std::string::npos) return true;
     if (msg.find("HTTP 429") != std::string::npos) return true;
     return false;
 }
 
-inline CompletionResult chat_completion(http::Client& http,
-                                        const Provider& provider,
-                                        const CompletionOptions& opts,
-                                        const std::vector<Message>& messages,
-                                        const json::Value& tools_json,
-                                        std::string_view api_key) {
+// ── Streaming chat completion ────────────────────────────────────────
+
+using StreamCallback = std::function<void(
+    std::string_view text_delta,
+    const std::vector<ToolCall>& tool_calls_so_far
+)>;
+
+inline CompletionResult chat_completion_stream(
+    http::Client& http,
+    const Provider& provider,
+    const CompletionOptions& opts,
+    const std::vector<Message>& messages,
+    const json::Value& tools_json,
+    std::string_view api_key,
+    StreamCallback on_chunk = nullptr) {
+
     json::Object req;
     req["model"] = json::Value{opts.model};
     req["temperature"] = json::Value{opts.temperature};
     if (opts.max_tokens) req["max_tokens"] = json::Value{*opts.max_tokens};
-    req["stream"] = json::Value{false};
+    req["stream"] = json::Value{true};
 
     json::Array msgs;
     msgs.reserve(messages.size());
@@ -186,10 +173,17 @@ inline CompletionResult chat_completion(http::Client& http,
     const std::string url = std::format("{}/chat/completions", provider.base_url);
     const std::string body = json::Value{req}.serialize();
 
-    http::Response resp = http.post_json(url, body, api_key);
+    // Streaming requests can take a long time (reasoning models may think
+    // for 30+ seconds before emitting the first token). Use generous timeouts.
+    http::RetryPolicy stream_policy;
+    stream_policy.max_attempts = 2;
+    stream_policy.min_backoff_sec = 15;
+    stream_policy.max_backoff_sec = 30;
+
+    // 600s = 10 minutes total timeout for the entire streaming response.
+    http::Response resp = http.post_json(url, body, api_key, 600, stream_policy);
 
     if (resp.status < 200 || resp.status >= 300) {
-        // Try to surface API error message.
         std::string detail;
         try {
             json::Value v = json::parse(resp.body);
@@ -200,65 +194,143 @@ inline CompletionResult chat_completion(http::Client& http,
                 std::string type = err.contains("type") && err["type"].is_string()
                                   ? err["type"].as_string() : std::string{};
                 detail = std::format(" [{}: {}]", type.empty() ? "error" : type, msg);
+            } else if (v.contains("error") && v["error"].is_string()) {
+                detail = std::format(" [error: {}]", v["error"].as_string());
+            } else if (v.contains("error_description") && v["error_description"].is_string()) {
+                detail = std::format(" [error_description: {}]", v["error_description"].as_string());
             }
         } catch (...) { detail = std::format(" body={}", resp.body); }
         throw LLMError(std::format("HTTP {} from {}{}", resp.status, provider.label, detail));
     }
 
-    json::Value v;
-    try {
-        v = json::parse(resp.body);
-    } catch (const std::exception& e) {
-        throw LLMError(std::format("failed to parse response JSON: {}; body head: {}",
-                                   e.what(), resp.body.substr(0, 200)));
-    }
-
+    // Parse SSE response body.
     CompletionResult result;
-    if (v.contains("usage") && v["usage"].is_object()) {
-        const auto& u = v["usage"];
-        result.prompt_tokens = static_cast<long>(u.contains("prompt_tokens") ? u["prompt_tokens"].as_number() : 0);
-        result.completion_tokens = static_cast<long>(u.contains("completion_tokens") ? u["completion_tokens"].as_number() : 0);
-        result.total_tokens = static_cast<long>(u.contains("total_tokens") ? u["total_tokens"].as_number() : 0);
-    }
-
-    if (!v.contains("choices") || !v["choices"].is_array() || v["choices"].as_array().empty()) {
-        throw LLMError(std::format("response missing choices: {}", resp.body.substr(0, 300)));
-    }
-    const auto& choice = v["choices"].as_array().front();
-    if (choice.contains("finish_reason") && choice["finish_reason"].is_string())
-        result.finish_reason = choice["finish_reason"].as_string();
-
-    if (!choice.contains("message") || !choice["message"].is_object()) {
-        throw LLMError(std::format("choice missing message: {}", resp.body.substr(0, 300)));
-    }
-    const auto& msg = choice["message"];
-
     Message am;
-    am.role = msg.contains("role") && msg["role"].is_string() ? msg["role"].as_string() : "assistant";
-    if (msg.contains("content")) {
-        if (msg["content"].is_string()) am.content = msg["content"].as_string();
-        else if (msg["content"].is_null()) am.content = std::string{};
+    am.role = "assistant";
+    std::string full_content;
+    std::vector<ToolCall> accumulated_tool_calls;
+    bool has_tool_calls = false;
+
+    struct PartialToolCall {
+        std::string id;
+        std::string function_name;
+        std::string arguments;
+        int index = 0;
+    };
+    std::vector<PartialToolCall> partial_tcs;
+
+    auto flush_partial_tool_calls = [&]() {
+        accumulated_tool_calls.clear();
+        for (const auto& ptc : partial_tcs) {
+            ToolCall tc;
+            tc.id = ptc.id;
+            tc.function_name = ptc.function_name;
+            tc.arguments = ptc.arguments;
+            accumulated_tool_calls.push_back(std::move(tc));
+        }
+    };
+
+    std::string buf = resp.body;
+    size_t pos = 0;
+    while (pos < buf.size()) {
+        size_t data_start = buf.find("data: ", pos);
+        if (data_start == std::string::npos) break;
+
+        size_t line_end = buf.find('\n', data_start);
+        if (line_end == std::string::npos) line_end = buf.size();
+
+        std::string line = buf.substr(data_start + 6, line_end - data_start - 6);
+        while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
+            line.pop_back();
+
+        pos = line_end + 1;
+
+        if (line.empty() || line == "[DONE]") continue;
+
+        json::Value chunk;
+        try {
+            chunk = json::parse(line);
+        } catch (...) {
+            continue;
+        }
+
+        if (chunk.contains("usage") && chunk["usage"].is_object()) {
+            const auto& u = chunk["usage"];
+            result.prompt_tokens = static_cast<long>(u.contains("prompt_tokens") ? u["prompt_tokens"].as_number() : 0);
+            result.completion_tokens = static_cast<long>(u.contains("completion_tokens") ? u["completion_tokens"].as_number() : 0);
+            result.total_tokens = static_cast<long>(u.contains("total_tokens") ? u["total_tokens"].as_number() : 0);
+        }
+
+        if (!chunk.contains("choices") || !chunk["choices"].is_array() || chunk["choices"].as_array().empty())
+            continue;
+
+        const auto& choice = chunk["choices"].as_array().front();
+
+        if (choice.contains("finish_reason") && choice["finish_reason"].is_string()) {
+            std::string fr = choice["finish_reason"].as_string();
+            if (!fr.empty() && fr != "null") result.finish_reason = fr;
+        }
+
+        if (!choice.contains("delta") || !choice["delta"].is_object())
+            continue;
+
+        const auto& delta = choice["delta"];
+
+        if (delta.contains("content") && delta["content"].is_string()) {
+            std::string text = delta["content"].as_string();
+            full_content += text;
+            if (on_chunk) on_chunk(text, accumulated_tool_calls);
+        }
+
+        if (delta.contains("tool_calls") && delta["tool_calls"].is_array()) {
+            has_tool_calls = true;
+            for (const auto& tc_delta : delta["tool_calls"].as_array()) {
+                int idx = 0;
+                if (tc_delta.contains("index") && tc_delta["index"].is_number())
+                    idx = static_cast<int>(tc_delta["index"].as_number());
+
+                while (static_cast<int>(partial_tcs.size()) <= idx)
+                    partial_tcs.push_back({});
+
+                auto& ptc = partial_tcs[idx];
+
+                if (tc_delta.contains("id") && tc_delta["id"].is_string())
+                    ptc.id = tc_delta["id"].as_string();
+
+                if (tc_delta.contains("function") && tc_delta["function"].is_object()) {
+                    const auto& fn = tc_delta["function"];
+                    if (fn.contains("name") && fn["name"].is_string())
+                        ptc.function_name = fn["name"].as_string();
+                    if (fn.contains("arguments") && fn["arguments"].is_string())
+                        ptc.arguments += fn["arguments"].as_string();
+                }
+
+                flush_partial_tool_calls();
+                if (on_chunk) on_chunk("", accumulated_tool_calls);
+            }
+        }
     }
 
-    if (msg.contains("tool_calls") && msg["tool_calls"].is_array()) {
-        for (const auto& tc : msg["tool_calls"].as_array()) {
-            ToolCall call;
-            call.id = tc.contains("id") && tc["id"].is_string() ? tc["id"].as_string() : "";
-            if (tc.contains("function") && tc["function"].is_object()) {
-                const auto& fn = tc["function"];
-                call.function_name = fn.contains("name") && fn["name"].is_string() ? fn["name"].as_string() : "";
-                // arguments is a JSON-encoded string.
-                if (fn.contains("arguments")) {
-                    if (fn["arguments"].is_string()) call.arguments = fn["arguments"].as_string();
-                    else call.arguments = fn["arguments"].serialize();  // fallback: re-serialize
-                }
-            }
-            am.tool_calls.push_back(std::move(call));
-        }
+    if (has_tool_calls) {
+        am.tool_calls = std::move(accumulated_tool_calls);
+        am.content = full_content.empty() ? std::optional<std::string>{} : std::optional<std::string>(full_content);
+    } else {
+        am.content = full_content.empty() ? std::optional<std::string>{} : std::optional<std::string>(full_content);
     }
 
     result.assistant = std::move(am);
     return result;
+}
+
+inline CompletionResult chat_completion(
+    http::Client& http,
+    const Provider& provider,
+    const CompletionOptions& opts,
+    const std::vector<Message>& messages,
+    const json::Value& tools_json,
+    std::string_view api_key) {
+
+    return chat_completion_stream(http, provider, opts, messages, tools_json, api_key, nullptr);
 }
 
 } // namespace llm

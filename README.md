@@ -21,9 +21,9 @@
 - **双模式运行**：
   - 交互式 REPL（多行输入，`.` 或 `Ctrl-D` 提交）
   - 单次任务模式 `--once "prompt"`（适合脚本化调用）
-- **多 Provider 支持**：内置 DeepSeek 与智谱 GLM，运行时可切换。
+- **多 Provider 支持**：内置 DeepSeek、智谱 GLM，运行时可切换。
 - **Token 用量统计**：每轮显示输入/输出 token，`/tokens` 查看累计。
-- **彩色终端输出**：自动检测 TTY，区分助手文本、工具调用、结果预览与错误。
+- **彩色终端输出**：自动检测 TTY，Markdown 渲染（表格、代码块、标题等）。
 - **跨平台构建**：CMake 自动探测 Termux 前缀与 libc++ ABI。
 
 ---
@@ -33,12 +33,14 @@
 ```
 cpp_agent/
 ├── CMakeLists.txt        # 构建配置（C++20，libcurl，Termux 探测）
+├── glm-agent             # 智谱 GLM 一键启动脚本
 └── src/
     ├── main.cpp          # 入口：参数解析、REPL、Agent 循环、系统提示词
     ├── llm.hpp           # OpenAI 兼容 chat-completion 客户端 + tool calling
     ├── tools.hpp         # 文件/Shell 工具实现与 JSON Schema 定义
     ├── http.hpp          # libcurl 轻量封装（JSON POST / Bearer 鉴权）
-    └── json.hpp          # 自包含 JSON 值/解析器/序列化器（无外部依赖）
+    ├── json.hpp          # 自包含 JSON 值/解析器/序列化器（无外部依赖）
+    └── markdown.hpp      # Markdown → 终端 ANSI 渲染器
 ```
 
 ---
@@ -83,7 +85,25 @@ export DEEPSEEK_API_KEY="sk-..."   # DeepSeek
 export ZHIPU_API_KEY="..."          # 智谱 GLM
 ```
 
-也可用 `--api-key` 参数显式传入。
+也可用 `--api-key` 参数显式传入，或在项目根目录创建 `.env` 文件：
+
+```
+ZHIPU_API_KEY=你的密钥
+```
+
+### 使用 GLM 模式（推荐）
+
+项目提供了便捷启动脚本 `glm-agent`，自动使用智谱 GLM 模型：
+
+```sh
+# 交互模式
+./glm-agent
+
+# 单次任务
+./glm-agent "分析 src 目录并总结架构"
+```
+
+脚本会自动读取 `ZHIPU_API_KEY` 环境变量或项目根目录的 `.env` 文件。
 
 ### 交互模式
 
@@ -115,12 +135,12 @@ coding-agent [OPTIONS] [--once "prompt"]
 
 OPTIONS
   -p, --provider <name>   deepseek | glm            (默认: deepseek)
-  -m, --model <name>      模型 id，如 deepseek-chat、glm-4.5、glm-5.2
+  -m, --model <name>      模型 id，如 deepseek-chat、glm-4.5
       --api-key <key>     API key（否则读取环境变量）
   -r, --root <dir>        工作区根目录              (默认: 当前目录)
   -t, --temperature <f>   0.0 - 2.0                 (默认: 0.3)
       --max-tokens <n>    最大输出 token 数
-      --max-iters <n>     Agent 循环上限            (默认: 30)
+      --max-iters <n>     Agent 循环上限            (默认: 100)
       --once "prompt"     执行单个任务后退出
   -h, --help              显示帮助
 
@@ -156,6 +176,7 @@ ENV
    - 受 `--max-iters` 限制，防止无限循环。
 3. **工具执行**（`tools::execute`）：解析 JSON 参数 → 路径沙箱校验 → 执行 → 截断过长输出（默认 60KB）后返回。
 4. **Shell 执行**（`run_shell`）：用 `posix_spawn` 启动 `/bin/sh -c`，通过管道捕获合并的 stdout+stderr，`select` 实现超时，超时则 `SIGKILL` 终止。
+5. **Markdown 渲染**：LLM 返回的 Markdown 文本在终端中自动渲染为带颜色和样式的输出（表格、代码块、标题等）。
 
 ---
 
