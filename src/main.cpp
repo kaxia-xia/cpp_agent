@@ -11,6 +11,8 @@
 #include "llm.hpp"
 #include "markdown.hpp"
 #include "tools.hpp"
+#include "context.hpp"
+#include "git.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -70,6 +72,10 @@ REPL COMMANDS
   /provider N  switch provider (deepseek|glm)
   /clear       reset conversation
   /tokens      show token usage totals
+  /snap [lbl]  save a labeled checkpoint of the current context
+  /versions    list saved context versions (/snaps, /history)
+  /back <id>   roll back the context to version <id>
+  /undo        undo the last turn (roll back one version)
   /exit        quit
   .  on its own line (or Ctrl-D) to submit a prompt
 )";
@@ -227,6 +233,18 @@ std::string build_system_prompt(const fs::path& root) {
         fs::weakly_canonical(root).string());
 }
 
+// Derive a short label for an auto-snapshot from the user's prompt.
+std::string snap_label(const std::string& prompt) {
+    auto nl = prompt.find('\n');
+    std::string first = (nl == std::string::npos) ? prompt : prompt.substr(0, nl);
+    auto a = first.find_first_not_of(" \t");
+    if (a == std::string::npos) return "turn";
+    auto b = first.find_last_not_of(" \t\r");
+    first = first.substr(a, b - a + 1);
+    if (first.size() > 40) first = first.substr(0, 40) + "...";
+    return first;
+}
+
 struct TurnOutcome {
     std::string final_text;
     long prompt_tokens = 0;
@@ -354,6 +372,30 @@ TurnOutcome run_turn(http::Client& http, const llm::Provider& provider,
     return out;
 }
 
+// ── Git integration ───────────────────────────────────────────────────
+
+// Initialise git at startup: check availability, ensure a repo exists.
+void init_git(const fs::path& root) {
+    if (!git::is_available()) {
+        std::cerr << std::format(
+            "[git] warning: git is not installed or not on PATH.\n"
+            "[git] file changes will NOT be versioned automatically.\n"
+            "[git] install git to enable automatic snapshots and easy undo.\n");
+        return;
+    }
+
+    if (!git::ensure_repo(root)) {
+        std::cerr << std::format(
+            "[git] warning: could not initialise git repository.\n");
+    }
+}
+
+// After a turn completes, commit any file changes that the agent made.
+void auto_commit(const fs::path& root, std::string_view label) {
+    if (!git::is_available()) return;  // already warned at startup
+    git::commit_changes(root, label);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -382,6 +424,9 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    // ── Git startup check ─────────────────────────────────────────
+    init_git(cfg.root);
+
     http::Client http;
     const json::Value tools_json = tools::tool_schemas();
 
@@ -403,17 +448,24 @@ int main(int argc, char** argv) {
             std::cerr << std::format("\n[tokens: in={}, out={}]\n", total_prompt, total_completion);
         } catch (const std::exception& e) {
             print_error(e.what());
+            // Even on error, commit any partial file changes the agent made.
+            auto_commit(cfg.root, snap_label(cfg.initial_prompt));
             return 1;
         }
+        // Auto-commit any file changes made during this turn.
+        auto_commit(cfg.root, snap_label(cfg.initial_prompt));
         return 0;
     }
+
+    context::History history;
+    history.save(messages, "init");
 
     std::cout << std::format("coding-agent  provider={}  model={}  root={}\n",
                              provider.name,
                              cfg.model.empty() ? provider.default_model : cfg.model,
                              cfg.root.string());
     std::cout << "Type your prompt; submit with a line containing only '.', or Ctrl-D.\n";
-    std::cout << "Commands: /help /model /provider /clear /tokens /exit\n\n";
+    std::cout << "Commands: /help /model /provider /clear /tokens /snap /versions /back /undo /exit\n\n";
 
     std::string line;
     while (true) {
@@ -436,6 +488,8 @@ int main(int argc, char** argv) {
             if (cmd == "/clear") {
                 messages.clear();
                 messages.push_back(llm::Message::system(build_system_prompt(cfg.root)));
+                history.clear();
+                history.save(messages, "init");
                 std::cout << "[conversation cleared]\n";
                 continue;
             }
@@ -468,6 +522,47 @@ int main(int argc, char** argv) {
                 }
                 continue;
             }
+            if (cmd == "/snap" || cmd.rfind("/snap ", 0) == 0) {
+                std::string label;
+                if (cmd.size() > 6) label = markdown::trim(cmd.substr(6));
+                int id = history.save(messages, label);
+                std::cout << std::format("[snapshot #{} saved: {}]\n",
+                                         id, label.empty() ? "(unlabeled)" : label);
+                continue;
+            }
+            if (cmd == "/versions" || cmd == "/snaps" || cmd == "/history") {
+                if (history.empty()) { std::cout << "[no snapshots yet]\n"; continue; }
+                std::cout << history.describe();
+                continue;
+            }
+            if (cmd == "/back" || cmd.rfind("/back ", 0) == 0) {
+                std::string arg = cmd.size() > 6 ? markdown::trim(cmd.substr(6)) : "";
+                int id = 0;
+                bool ok = !arg.empty();
+                if (ok) { try { id = std::stoi(arg); } catch (...) { ok = false; } }
+                if (!ok) { std::cout << "[usage: /back <id>  (use /versions to list)]\n"; continue; }
+                std::vector<llm::Message> restored;
+                if (history.rollback(id, restored)) {
+                    messages = std::move(restored);
+                    std::cout << std::format("[rolled back to version #{} ({} messages)]\n",
+                                             id, messages.size());
+                } else {
+                    std::cout << std::format("[no version with id {}  (use /versions to list)]\n", id);
+                }
+                continue;
+            }
+            if (cmd == "/undo") {
+                std::vector<llm::Message> restored;
+                if (history.undo(restored)) {
+                    int cid = history.current_id();
+                    messages = std::move(restored);
+                    std::cout << std::format("[undone: back to version #{} ({} messages)]\n",
+                                             cid, messages.size());
+                } else {
+                    std::cout << "[nothing to undo]\n";
+                }
+                continue;
+            }
             std::cout << "[unknown command: " << cmd << "  (try /help)]\n";
             continue;
         }
@@ -478,6 +573,10 @@ int main(int argc, char** argv) {
             total_prompt += out.prompt_tokens;
             total_completion += out.completion_tokens;
             std::cout << std::format("[{} in / {} out]\n", out.prompt_tokens, out.completion_tokens);
+            history.save(messages, snap_label(prompt));
+
+            // Auto-commit any file changes made during this turn.
+            auto_commit(cfg.root, snap_label(prompt));
         } catch (const llm::LLMError& e) {
             print_error(e.what());
             if (!messages.empty() && messages.back().role == "user") messages.pop_back();
