@@ -21,6 +21,7 @@
 #include <format>
 #include <iostream>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -391,13 +392,15 @@ void init_git(const fs::path& root) {
 }
 
 // After a turn completes, commit any file changes that the agent made.
-void auto_commit(const fs::path& root, std::string_view label) {
+// Only files that were NOT already dirty before the turn are committed.
+void auto_commit(const fs::path& root, std::string_view label,
+                 const std::set<std::string>& dirty_before) {
     if (!git::is_available()) return;  // already warned at startup
     // Show a brief status message so the user knows something is happening.
     set_color("2");
     std::cerr << "[git] committing changes... " << std::flush;
     reset_color();
-    git::commit_changes(root, label);
+    git::commit_changes(root, label, dirty_before);
     std::cerr << "\r\033[K";  // clear the status line
     std::cerr << std::flush;
 }
@@ -481,6 +484,13 @@ int main(int argc, char** argv) {
             return 2;
         }
         messages.push_back(llm::Message::user(cfg.initial_prompt));
+
+        // Snapshot dirty files before the turn so we only commit agent changes.
+        std::set<std::string> dirty_before;
+        if (git::is_available()) {
+            dirty_before = git::get_dirty_files(cfg.root);
+        }
+
         try {
             TurnOutcome out = run_turn(http, provider, cfg, messages, tools_json, api_key);
             total_prompt += out.prompt_tokens;
@@ -489,11 +499,11 @@ int main(int argc, char** argv) {
         } catch (const std::exception& e) {
             print_error(e.what());
             // Even on error, commit any partial file changes the agent made.
-            auto_commit(cfg.root, snap_label(cfg.initial_prompt));
+            auto_commit(cfg.root, snap_label(cfg.initial_prompt), dirty_before);
             return 1;
         }
         // Auto-commit any file changes made during this turn.
-        auto_commit(cfg.root, snap_label(cfg.initial_prompt));
+        auto_commit(cfg.root, snap_label(cfg.initial_prompt), dirty_before);
         return 0;
     }
 
@@ -610,6 +620,13 @@ int main(int argc, char** argv) {
 
         // ── Process user prompt ───────────────────────────────────
         messages.push_back(llm::Message::user(prompt));
+
+        // Snapshot dirty files before the turn so we only commit agent changes.
+        std::set<std::string> dirty_before;
+        if (git::is_available()) {
+            dirty_before = git::get_dirty_files(cfg.root);
+        }
+
         try {
             TurnOutcome out = run_turn(http, provider, cfg, messages, tools_json, api_key);
             total_prompt += out.prompt_tokens;
@@ -618,7 +635,7 @@ int main(int argc, char** argv) {
             history.save(messages, snap_label(prompt));
 
             // Auto-commit any file changes made during this turn.
-            auto_commit(cfg.root, snap_label(prompt));
+            auto_commit(cfg.root, snap_label(prompt), dirty_before);
         } catch (const llm::LLMError& e) {
             print_error(e.what());
             if (!messages.empty() && messages.back().role == "user") messages.pop_back();
