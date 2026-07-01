@@ -156,13 +156,36 @@ inline std::set<std::string> get_dirty_files(const fs::path& root) {
     return dirty;
 }
 
+// Get the full SHA hash of the current HEAD commit.
+// Returns empty string on failure.
+inline std::string get_head_hash(const fs::path& root) {
+    auto [rc, out] = run_git(root, "rev-parse HEAD");
+    if (rc != 0) return {};
+    return trim(out);
+}
+
+// Reset the working tree to a specific commit hash.
+// Uses `git reset --hard` to restore both the index and working tree.
+// Returns true on success.
+inline bool reset_to_commit(const fs::path& root, std::string_view hash) {
+    if (hash.empty()) return false;
+    auto [rc, out] = run_git(root, std::format("reset --hard {}", hash));
+    if (rc != 0) {
+        std::cerr << std::format("[git] warning: reset --hard failed: {}\n", out);
+        return false;
+    }
+    // Also clean untracked files that were added by the agent.
+    run_git(root, "clean -fd");
+    return true;
+}
+
 // Commit only the files that were modified by the agent during this turn.
 // `label` is a short human-readable description of the turn (e.g. the user prompt).
 // `dirty_before` is the set of files that were already dirty before the turn started;
 // these files will NOT be included in the commit.
-// Returns true if a commit was made (i.e. there were changes).
-inline bool commit_changes(const fs::path& root, std::string_view label,
-                           const std::set<std::string>& dirty_before) {
+// Returns the commit hash on success, empty string on failure.
+inline std::string commit_changes(const fs::path& root, std::string_view label,
+                                  const std::set<std::string>& dirty_before) {
     // Get the current set of dirty files.
     std::set<std::string> dirty_now = get_dirty_files(root);
 
@@ -176,7 +199,7 @@ inline bool commit_changes(const fs::path& root, std::string_view label,
 
     if (agent_changed.empty()) {
         // No new changes – nothing to commit.
-        return false;
+        return {};
     }
 
     // Stage only the files the agent changed.
@@ -190,13 +213,13 @@ inline bool commit_changes(const fs::path& root, std::string_view label,
     auto [rc_add, out_add] = run_git(root, std::format("add -- {}", add_args));
     if (rc_add != 0) {
         std::cerr << std::format("[git] warning: git add failed: {}\n", out_add);
-        return false;
+        return {};
     }
 
     // Check if there is anything to commit (should always be true here, but be safe).
     auto [rc_diff, out_diff] = run_git(root, "diff --cached --stat");
     if (rc_diff != 0 || out_diff.empty()) {
-        return false;
+        return {};
     }
 
     // Build a descriptive commit message.
@@ -209,18 +232,21 @@ inline bool commit_changes(const fs::path& root, std::string_view label,
         std::format("commit -m '{}'", shell_escape(msg)));
     if (rc_cm != 0) {
         std::cerr << std::format("[git] warning: commit failed: {}\n", out_cm);
-        return false;
+        return {};
     }
 
+    // Get the commit hash of the new commit.
+    std::string hash = get_head_hash(root);
+
     // Print a short summary of what was committed.
-    std::cout << std::format("[git] committed: {}\n", msg);
+    std::cout << std::format("[git] committed: {}  ({})\n", msg, hash.empty() ? "?" : hash.substr(0, 12));
     // Show the files that were changed (diff --stat output is multi-line).
     auto lines = split_lines(out_diff);
     for (const auto& l : lines) {
         if (!l.empty()) std::cout << "  " << l << '\n';
     }
 
-    return true;
+    return hash;
 }
 
 } // namespace git

@@ -29,6 +29,7 @@ struct Snapshot {
     int id = 0;
     std::string label;
     std::string timestamp;                 // human-readable wall-clock time
+    std::string git_commit_hash;           // matching git commit hash (for file rollback)
     std::vector<llm::Message> messages;    // full copy of the context
 };
 
@@ -39,11 +40,14 @@ struct Snapshot {
 class History {
 public:
     // Save the current messages as a new version. Returns the new version id.
-    int save(std::vector<llm::Message> messages, std::string label) {
+    // Optionally associates a git commit hash for file-level rollback.
+    int save(std::vector<llm::Message> messages, std::string label,
+             std::string git_commit_hash = {}) {
         Snapshot s;
         s.id = next_id_++;
         s.label = std::move(label);
         s.timestamp = now_string();
+        s.git_commit_hash = std::move(git_commit_hash);
         s.messages = std::move(messages);
         current_id_ = s.id;
         snapshots_.push_back(std::move(s));
@@ -60,6 +64,22 @@ public:
         snapshots_.erase(it + 1, snapshots_.end());
         current_id_ = id;
         return true;
+    }
+
+    // Get the git commit hash associated with a snapshot id.
+    // Returns empty string if not found or no hash was stored.
+    std::string get_commit_hash(int id) const {
+        auto it = std::find_if(snapshots_.begin(), snapshots_.end(),
+                               [&](const Snapshot& s) { return s.id == id; });
+        if (it == snapshots_.end()) return {};
+        return it->git_commit_hash;
+    }
+
+    // Get the git commit hash of the snapshot just before the current one
+    // (for undo). Returns empty string if there is no previous snapshot.
+    std::string get_previous_commit_hash() const {
+        if (snapshots_.size() < 2) return {};
+        return snapshots_[snapshots_.size() - 2].git_commit_hash;
     }
 
     // Convenience: undo the most recent version (restore the previous one).
@@ -84,9 +104,14 @@ public:
     [[nodiscard]] std::string describe() const {
         std::string out = "context versions (* = current):\n";
         for (const auto& s : snapshots_) {
-            out += std::format("{} #{}  {}  {} msgs  {}\n",
+            std::string git_info;
+            if (!s.git_commit_hash.empty()) {
+                git_info = std::format(" git:{}", s.git_commit_hash.substr(0, 12));
+            }
+            out += std::format("{} #{}  {}  {} msgs{}  {}\n",
                                (s.id == current_id_) ? "*" : " ",
                                s.id, s.timestamp, s.messages.size(),
+                               git_info,
                                s.label.empty() ? "(unlabeled)" : s.label);
         }
         return out;

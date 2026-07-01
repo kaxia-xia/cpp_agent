@@ -394,14 +394,14 @@ void init_git(const fs::path& root) {
 
 // After a turn completes, commit any file changes that the agent made.
 // Only files that were NOT already dirty before the turn are committed.
-void auto_commit(const fs::path& root, std::string_view label,
+std::string auto_commit(const fs::path& root, std::string_view label,
                  const std::set<std::string>& dirty_before) {
-    if (!git::is_available()) return;  // already warned at startup
+    if (!git::is_available()) return {};  // already warned at startup
     // Show a brief status message so the user knows something is happening.
     set_color("2");
     std::cerr << "[git] committing changes... " << std::flush;
     reset_color();
-    git::commit_changes(root, label, dirty_before);
+    return git::commit_changes(root, label, dirty_before);
     std::cerr << "\r\033[K";  // clear the status line
     std::cerr << std::flush;
 }
@@ -597,7 +597,17 @@ int main(int argc, char** argv) {
                     messages = std::move(restored);
                     std::cout << std::format("[rolled back to version #{} ({} messages)]\n",
                                              id, messages.size());
-                } else {
+                    // Also restore files to the matching git commit.
+                    if (git::is_available()) {
+                        std::string hash = history.get_commit_hash(id);
+                        if (!hash.empty()) {
+                            if (git::reset_to_commit(cfg.root, hash)) {
+                                std::cout << "[git] files restored to snapshot #" << id << "\n";
+                            }
+                        }
+                    }
+                }
+                else {
                     std::cout << std::format("[no version with id {}  (use /versions to list)]\n", id);
                 }
                 continue;
@@ -609,7 +619,17 @@ int main(int argc, char** argv) {
                     messages = std::move(restored);
                     std::cout << std::format("[undone: back to version #{} ({} messages)]\n",
                                              cid, messages.size());
-                } else {
+                    // Also restore files to the previous git commit.
+                    if (git::is_available()) {
+                        std::string hash = history.get_previous_commit_hash();
+                        if (!hash.empty()) {
+                            if (git::reset_to_commit(cfg.root, hash)) {
+                                std::cout << "[git] files restored to previous snapshot\n";
+                            }
+                        }
+                    }
+                }
+                else {
                     std::cout << "[nothing to undo]\n";
                 }
                 continue;
@@ -632,7 +652,6 @@ int main(int argc, char** argv) {
             total_prompt += out.prompt_tokens;
             total_completion += out.completion_tokens;
             std::cout << std::format("[{} in / {} out]\n", out.prompt_tokens, out.completion_tokens);
-            history.save(messages, snap_label(prompt));
         } catch (const llm::LLMError& e) {
             print_error(e.what());
             if (!messages.empty() && messages.back().role == "user") messages.pop_back();
@@ -640,7 +659,12 @@ int main(int argc, char** argv) {
             print_error(e.what());
         }
         // Auto-commit any file changes made during this turn, even on error.
-        auto_commit(cfg.root, snap_label(prompt), dirty_before);
+        std::string commit_hash = auto_commit(cfg.root, snap_label(prompt), dirty_before);
+        if (!commit_hash.empty()) {
+            history.save(messages, snap_label(prompt), commit_hash);
+        } else {
+            history.save(messages, snap_label(prompt));
+        }
         std::cout << '\n';
     }
     return 0;
