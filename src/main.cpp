@@ -503,7 +503,6 @@ int main(int argc, char** argv) {
             auto_commit(cfg.root, snap_label(cfg.initial_prompt), dirty_before);
             return 1;
         }
-        // Auto-commit any file changes made during this turn.
         auto_commit(cfg.root, snap_label(cfg.initial_prompt), dirty_before);
         return 0;
     }
@@ -634,15 +633,14 @@ int main(int argc, char** argv) {
             total_completion += out.completion_tokens;
             std::cout << std::format("[{} in / {} out]\n", out.prompt_tokens, out.completion_tokens);
             history.save(messages, snap_label(prompt));
-
-            // Auto-commit any file changes made during this turn.
-            auto_commit(cfg.root, snap_label(prompt), dirty_before);
         } catch (const llm::LLMError& e) {
             print_error(e.what());
             if (!messages.empty() && messages.back().role == "user") messages.pop_back();
         } catch (const std::exception& e) {
             print_error(e.what());
         }
+        // Auto-commit any file changes made during this turn, even on error.
+        auto_commit(cfg.root, snap_label(prompt), dirty_before);
         std::cout << '\n';
     }
     return 0;
