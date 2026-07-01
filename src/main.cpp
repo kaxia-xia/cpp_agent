@@ -212,9 +212,10 @@ std::string resolve_api_key(const Config& cfg, const llm::Provider& p) {
 
 std::string build_system_prompt(const fs::path& root) {
     return std::format(
+        "当前环境为android termux，基于这一点处理接下来的对话。\n\n"
         "You are coding-agent, an autonomous software-engineering assistant running in a Linux "
-        "terminal. Your job is to help the user write, understand, refactor, and debug code.\n\n"
-        "WORKSPACE\n  root: {}\n  os:   Linux\n\n"
+        "terminal (Android Termux). Your job is to help the user write, understand, refactor, and debug code.\n\n"
+        "WORKSPACE\n  root: {}\n  os:   Android (Termux)\n\n"
         "TOOLS available (call via function/tool calling):\n"
         "  - read_file(path): read a text file under the workspace.\n"
         "  - write_file(path, content): create/overwrite a file; parent dirs auto-created.\n"
