@@ -393,7 +393,47 @@ void init_git(const fs::path& root) {
 // After a turn completes, commit any file changes that the agent made.
 void auto_commit(const fs::path& root, std::string_view label) {
     if (!git::is_available()) return;  // already warned at startup
+    // Show a brief status message so the user knows something is happening.
+    set_color("2");
+    std::cerr << "[git] committing changes... " << std::flush;
+    reset_color();
     git::commit_changes(root, label);
+    std::cerr << "\r\033[K";  // clear the status line
+    std::cerr << std::flush;
+}
+
+// ── REPL input reader ────────────────────────────────────────────────
+//
+// Reads one prompt from stdin.  Returns true if a prompt was read.
+// The prompt is terminated by a line containing only "." or by EOF.
+// On EOF with no input, returns false (caller should exit).
+//
+// This function handles both interactive (tty) and pipe modes correctly.
+//
+bool read_prompt(std::string& prompt) {
+    prompt.clear();
+    bool got_any = false;
+    std::string line;
+
+    while (std::getline(std::cin, line)) {
+        if (line == ".") {
+            // Terminator line: stop reading.
+            break;
+        }
+        if (!prompt.empty()) prompt.push_back('\n');
+        prompt += line;
+        got_any = true;
+    }
+
+    if (std::cin.eof()) {
+        // Clear EOF so subsequent reads work (important for pipe mode).
+        std::cin.clear();
+        // If we got nothing at all, it's a real EOF → signal exit.
+        if (!got_any) return false;
+        // Otherwise we have a prompt (user typed something then Ctrl-D).
+    }
+
+    return got_any;
 }
 
 } // namespace
@@ -467,20 +507,21 @@ int main(int argc, char** argv) {
     std::cout << "Type your prompt; submit with a line containing only '.', or Ctrl-D.\n";
     std::cout << "Commands: /help /model /provider /clear /tokens /snap /versions /back /undo /exit\n\n";
 
-    std::string line;
+    std::string prompt;
     while (true) {
+        // Print the prompt indicator.
         set_color("35"); std::cout << "> " << std::flush; reset_color();
-        std::string prompt;
-        bool got_any = false;
-        while (std::getline(std::cin, line)) {
-            if (line == ".") { break; }
-            if (!prompt.empty()) prompt.push_back('\n');
-            prompt += line;
-            got_any = true;
+
+        // Read user input using the helper that handles EOF correctly.
+        if (!read_prompt(prompt)) {
+            // True EOF (Ctrl-D on empty line) → exit.
+            std::cout << "\n";
+            break;
         }
-        if (!got_any && std::cin.eof()) { std::cout << "\n"; break; }
+
         if (prompt.empty()) continue;
 
+        // ── Handle slash commands ─────────────────────────────────
         if (prompt.size() > 1 && prompt.front() == '/' && prompt.find('\n') == std::string::npos) {
             std::string cmd = prompt;
             if (cmd == "/exit" || cmd == "/quit") break;
@@ -567,6 +608,7 @@ int main(int argc, char** argv) {
             continue;
         }
 
+        // ── Process user prompt ───────────────────────────────────
         messages.push_back(llm::Message::user(prompt));
         try {
             TurnOutcome out = run_turn(http, provider, cfg, messages, tools_json, api_key);
