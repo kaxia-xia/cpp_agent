@@ -93,7 +93,7 @@
 
 ```bash
 pkg update
-pkg install clang cmake libcurl git
+pkg install clang cmake libcurl git libandroid-spawn
 ```
 
 ---
