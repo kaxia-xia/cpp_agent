@@ -111,26 +111,48 @@ cmake -B build && cmake --build build
 
 ## ⚙️ 配置 API 密钥
 
-### 方式一：环境变量
+程序通过**环境变量**读取 API 密钥，支持以下方式：
+
+### 方式一：export 环境变量（推荐）
 
 ```bash
 # DeepSeek
 export DEEPSEEK_API_KEY="sk-..."
+./build/coding-agent
 
 # 或 智谱 GLM
 export ZHIPU_API_KEY="你的智谱API密钥"
+./build/coding-agent --provider glm
 ```
 
-### 方式二：`.env` 文件
-
-在项目根目录或 `build/` 目录下创建 `.env` 文件：
+### 方式二：单行命令临时设置
 
 ```bash
-# .env
-ZHIPU_API_KEY=你的智谱API密钥
+# DeepSeek
+DEEPSEEK_API_KEY="sk-..." ./build/coding-agent
+
+# 智谱 GLM
+ZHIPU_API_KEY="你的智谱API密钥" ./build/coding-agent --provider glm
 ```
 
-### 方式三：命令行参数
+### 方式三：使用 `.env` 文件 + source 加载
+
+在 `build/` 目录下创建 `.env` 文件，运行前用 `source` 加载：
+
+```bash
+# build/.env
+export DEEPSEEK_API_KEY="sk-..."
+export ZHIPU_API_KEY="你的智谱API密钥"
+```
+
+```bash
+# 运行
+source build/.env && ./build/coding-agent
+```
+
+> ⚠️ 注意：程序本身不会自动读取 `.env` 文件，需要手动 `source` 加载。
+
+### 方式四：命令行参数
 
 ```bash
 ./build/coding-agent --api-key "sk-..."
@@ -163,25 +185,10 @@ ZHIPU_API_KEY=你的智谱API密钥
 ./build/coding-agent "修复 main.cpp 里的编译警告"
 ```
 
-### 3️⃣ 使用智谱 GLM（推荐启动脚本）
-
-项目提供了便捷启动脚本 `build/glm-agent`，自动使用智谱 GLM 模型：
+### 3️⃣ 指定 provider 和模型
 
 ```bash
-# 交互模式（默认 glm-4-flash）
-./build/glm-agent
-
-# 指定更强模型
-CODING_AGENT_MODEL=glm-4.5 ./build/glm-agent
-
-# 单次任务
-./build/glm-agent "分析项目架构"
-```
-
-### 4️⃣ 指定 provider 和模型
-
-```bash
-# 使用 DeepSeek
+# 使用 DeepSeek（默认）
 ./build/coding-agent --provider deepseek --model deepseek-chat
 
 # 使用智谱 GLM
@@ -191,7 +198,7 @@ CODING_AGENT_MODEL=glm-4.5 ./build/glm-agent
 ./build/coding-agent --provider glm --model glm-4.5
 ```
 
-### 5️⃣ 指定工作目录
+### 4️⃣ 指定工作目录
 
 ```bash
 ./build/coding-agent --root /data/data/com.termux/files/home/my-project
@@ -275,8 +282,7 @@ context versions (* = current):
 cpp_agent/
 ├── CMakeLists.txt        # 构建配置（C++20，libcurl，Termux 探测）
 ├── build/
-│   ├── coding-agent      # 编译产物
-│   └── glm-agent         # 智谱 GLM 一键启动脚本
+│   └── coding-agent      # 编译产物
 └── src/
     ├── main.cpp          # 入口：参数解析、REPL、Agent 循环、系统提示词
     ├── llm.hpp           # OpenAI 兼容 chat-completion 客户端 + tool calling
