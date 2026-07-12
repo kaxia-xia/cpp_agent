@@ -135,24 +135,7 @@ DEEPSEEK_API_KEY="sk-..." ./build/coding-agent
 ZHIPU_API_KEY="你的智谱API密钥" ./build/coding-agent --provider glm
 ```
 
-### 方式三：使用 `.env` 文件 + source 加载
-
-在 `build/` 目录下创建 `.env` 文件，运行前用 `source` 加载：
-
-```bash
-# build/.env
-export DEEPSEEK_API_KEY="sk-..."
-export ZHIPU_API_KEY="你的智谱API密钥"
-```
-
-```bash
-# 运行
-source build/.env && ./build/coding-agent
-```
-
-> ⚠️ 注意：程序本身不会自动读取 `.env` 文件，需要手动 `source` 加载。
-
-### 方式四：命令行参数
+### 方式三：命令行参数
 
 ```bash
 ./build/coding-agent --api-key "sk-..."
