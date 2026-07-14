@@ -44,10 +44,14 @@ inline std::string shell_escape(std::string_view s) {
 
 // Run a git command in the given directory, capturing output.
 // Returns (exit_code, stdout+stderr).
+// NOTE: we pass -c core.quotePath=false so that filenames with non-ASCII
+// characters (e.g. Chinese) are output in their raw form rather than
+// backslash-escaped.  This is critical because we parse file names from
+// git output and later use them in git add / other commands.
 inline std::pair<int, std::string> run_git(const fs::path& cwd,
                                             std::string_view args) {
     // Quote the directory path so spaces and special chars are safe.
-    std::string cmd = std::format("cd '{}' && git {} 2>&1",
+    std::string cmd = std::format("cd '{}' && git -c core.quotePath=false {} 2>&1",
                                   shell_escape(cwd.string()), args);
     FILE* fp = ::popen(cmd.c_str(), "r");
     if (!fp) return {-1, "popen failed"};
