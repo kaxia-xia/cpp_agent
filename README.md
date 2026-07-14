@@ -49,6 +49,13 @@
 - 支持撤销上一轮对话（`/undo`）
 - 回退上下文时自动同步回退 git 文件改动
 
+### ⏯️ 终端流控制（Ctrl+S / Ctrl+Q）
+
+- 使用终端内核级的 **IXON 流控制**，无需原始模式（raw mode）或后台线程
+- **Ctrl+S** 暂停所有输出（stdout + stderr），**Ctrl+Q** 恢复输出
+- 在终端内核层面生效，对应用程序完全透明
+- 启动时自动检测并启用 IXON，若终端不支持则提示用户
+
 ### 🎨 彩色终端输出
 
 - 自动检测 TTY，Markdown 渲染（表格、代码块、标题等）
@@ -229,6 +236,14 @@ ENV
 | `/undo` | 撤销最近一轮对话（回退到上一个版本，同时回退 git 文件改动） |
 | `/exit` | 退出 |
 
+### 终端快捷键
+
+| 快捷键 | 说明 |
+|--------|------|
+| `Ctrl+S` | 暂停输出（终端流控制） |
+| `Ctrl+Q` | 恢复输出 |
+| `Ctrl-D` | 提交提示词（在空行上按则退出） |
+
 ---
 
 ## ⏪ 上下文回退示例
@@ -267,7 +282,7 @@ cpp_agent/
 ├── build/
 │   └── coding-agent      # 编译产物
 └── src/
-    ├── main.cpp          # 入口：参数解析、REPL、Agent 循环、系统提示词
+    ├── main.cpp          # 入口：参数解析、REPL、Agent 循环、系统提示词、终端流控制
     ├── llm.hpp           # OpenAI 兼容 chat-completion 客户端 + tool calling
     ├── tools.hpp         # 文件/Shell 工具实现与 JSON Schema 定义
     ├── context.hpp       # 上下文版本管理 / 回退（快照、回滚、撤销）
@@ -290,8 +305,9 @@ cpp_agent/
 3. **工具执行**（`tools::execute`）：解析 JSON 参数 → 路径沙箱校验 → 执行 → 截断过长输出（默认 60KB）后返回。
 4. **Shell 执行**（`run_shell`）：用 `posix_spawn` 启动 `/bin/sh -c`，通过管道捕获合并的 stdout+stderr，`select` 实现超时，超时则 `SIGKILL` 终止。
 5. **Markdown 渲染**：LLM 返回的 Markdown 文本在终端中自动渲染为带颜色和样式的输出。
-6. **上下文版本管理**（`context::History`）：每轮对话后保存消息历史的完整快照；回退时恢复指定快照并丢弃其后版本。
-7. **Git 自动提交**（`git::commit_changes`）：每轮对话后执行 `git add -A && git commit`，记录文件级别的改动历史。
+6. **终端流控制（Ctrl+S / Ctrl+Q）**：利用终端内核自带的 **IXON 流控制**。当 IXON 启用时，终端驱动在**内核层面**拦截 Ctrl+S 和 Ctrl+Q——Ctrl+S 暂停 stdout/stderr 输出，Ctrl+Q 恢复输出，应用程序完全无感知。无需原始模式（raw mode）、无需信号处理、无需后台线程，也不会与 `std::getline` 等正常输入产生冲突。启动时通过 `ensure_ixon()` 检测并启用 IXON，若终端不支持则提示用户。
+7. **上下文版本管理**（`context::History`）：每轮对话后保存消息历史的完整快照；回退时恢复指定快照并丢弃其后版本。
+8. **Git 自动提交**（`git::commit_changes`）：每轮对话后执行 `git add -A && git commit`，记录文件级别的改动历史。
 
 ---
 
