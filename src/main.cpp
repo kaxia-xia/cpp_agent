@@ -1,4 +1,4 @@
-// coding-agent: a Linux terminal coding agent powered by DeepSeek / Zhipu GLM.
+// coding-agent: a terminal coding agent powered by DeepSeek / Zhipu GLM.
 //
 // Build:   cmake -B build && cmake --build build
 // Run:     DEEPSEEK_API_KEY=... ./build/coding-agent
@@ -16,7 +16,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <termios.h>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -24,6 +23,8 @@
 #include <iostream>
 #include <optional>
 #include <set>
+#include <signal.h>
+#include <termios.h>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -36,72 +37,47 @@ namespace {
 
 // ── Pause/Resume (Ctrl+S / Ctrl+Q) ───────────────────────────────────
 //
-// We put the terminal into raw mode so that Ctrl+S (0x13) and Ctrl+Q (0x11)
-// are not intercepted by the terminal driver's software flow control (IXON).
-// A background thread reads stdin and toggles an atomic flag.
+// We use signal-based approach: SIGTSTP (Ctrl+Z typical) is NOT what we want.
+// Instead we use a background thread that polls the pause state via a pipe,
+// and we install a signal handler for SIGUSR1/SIGUSR2 triggered by... no,
+// that's too complex.
 //
-// All output functions check the flag before writing; if paused they busy-wait
-// (with a small sleep) until the user presses Ctrl+Q to resume.
+// Better approach: use the terminal's own IXON flow control.
+// When IXON is enabled (default), the terminal driver itself pauses output
+// on Ctrl+S and resumes on Ctrl+Q — at the kernel level, before the
+// application even sees the bytes.  This means:
+//   - No raw mode needed
+//   - No background thread eating stdin
+//   - No interference with normal input (getline, etc.)
+//   - Works automatically for ALL output (stdout, stderr)
+//
+// The only thing we need to do is ENSURE IXON is enabled on the terminal.
+// Some Termux setups or wrapper scripts may disable it.
+//
+// We also provide a visual indicator by checking if output is actually
+// blocked (by trying to write and seeing if it would block), but that's
+// complex.  Instead we just print a hint at startup and let the kernel
+// handle it transparently.
 
-static std::atomic<bool> g_paused{false};
+// Check if IXON is enabled on stdin (the terminal).
+// If it is, Ctrl+S/Ctrl+Q flow control works automatically.
 
-// Restore terminal to cooked mode on exit.
-static struct termios g_orig_termios;
-static bool g_termios_saved = false;
+// Try to enable IXON if it's disabled.  Returns true if IXON is active
+// after the call (either it was already on, or we successfully turned it on).
+bool ensure_ixon() {
+    if (!isatty(STDIN_FILENO)) return false;
+    struct termios t;
+    if (tcgetattr(STDIN_FILENO, &t) != 0) return false;
+    if (t.c_iflag & IXON) return true;  // already enabled
 
-void restore_termios() {
-    if (g_termios_saved) {
-        tcsetattr(STDIN_FILENO, TCSANOW, &g_orig_termios);
-        g_termios_saved = false;
-    }
-}
-
-// Put stdin into raw mode so we can capture Ctrl+S/Ctrl+Q ourselves.
-// Also disable IXON so the kernel doesn't eat those characters.
-bool setup_raw_input() {
-    if (!isatty(STDIN_FILENO)) return false;  // not a terminal, skip
-
-    struct termios raw;
-    if (tcgetattr(STDIN_FILENO, &g_orig_termios) != 0) return false;
-    g_termios_saved = true;
-    std::atexit(restore_termios);
-
-    raw = g_orig_termios;
-    // Disable IXON (software flow control), so Ctrl+S/Ctrl+Q reach us.
-    // Also set non-canonical mode with no echo so we can read single chars.
-    raw.c_iflag &= ~(IXON | ICRNL | INLCR | IGNCR);
-    raw.c_lflag &= ~(ECHO | ICANON | ISIG);
-    raw.c_cc[VMIN] = 1;   // read returns as soon as 1 byte available
-    raw.c_cc[VTIME] = 0;  // no timeout
-    tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+    // Enable IXON.
+    t.c_iflag |= IXON;
+    // Also set VSTART/VSTOP to the default Ctrl+Q / Ctrl+S if they are
+    // somehow changed.
+    t.c_cc[VSTART] = 0x11;  // Ctrl+Q
+    t.c_cc[VSTOP]  = 0x13;  // Ctrl+S
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &t) != 0) return false;
     return true;
-}
-
-// Background thread: reads stdin for Ctrl+S (0x13) and Ctrl+Q (0x11).
-void pause_listener() {
-    // Only run if we successfully set raw mode.
-    if (!g_termios_saved) return;
-
-    char c;
-    while (read(STDIN_FILENO, &c, 1) == 1) {
-        if (c == 0x13) {  // Ctrl+S
-            g_paused = true;
-            // Write a visual indicator to stderr (doesn't interfere with stdout).
-            std::cerr << "\033[7m PAUSED \033[0m" << std::flush;
-        } else if (c == 0x11) {  // Ctrl+Q
-            g_paused = false;
-            std::cerr << "\033[7m RESUMED \033[0m" << std::flush;
-        }
-        // All other bytes are ignored (they remain buffered for the main
-        // thread's getline() calls).
-    }
-}
-
-// Wait if paused.  Call this before every write to stdout/stderr.
-inline void pause_point() {
-    while (g_paused.load(std::memory_order_acquire)) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }
 }
 
 // ── Config & helpers ─────────────────────────────────────────────────
@@ -155,17 +131,17 @@ REPL COMMANDS
   .  on its own line (or Ctrl-D) to submit a prompt
 
 FLOW CONTROL
-  Ctrl+S      pause output
+  Ctrl+S      pause output (terminal flow control)
   Ctrl+Q      resume output
 )";
 
 bool is_tty() { return ::isatty(STDOUT_FILENO) != 0; }
 
 void set_color(std::string_view code) {
-    if (is_tty()) { pause_point(); std::cout << "\033[" << code << 'm'; }
+    if (is_tty()) std::cout << "\033[" << code << 'm';
 }
 void reset_color() {
-    if (is_tty()) { pause_point(); std::cout << "\033[0m"; }
+    if (is_tty()) std::cout << "\033[0m";
 }
 
 // Streaming-aware printer: renders markdown incrementally as text arrives.
@@ -201,7 +177,6 @@ struct StreamPrinter {
 };
 
 void print_tool_call(std::string_view name, std::string_view args) {
-    pause_point();
     set_color("33");
     std::cout << "[tool] " << name;
     if (!args.empty()) {
@@ -214,7 +189,6 @@ void print_tool_call(std::string_view name, std::string_view args) {
 }
 
 void print_tool_result(std::string_view result) {
-    pause_point();
     set_color("2");
     std::string r(result);
     std::string preview = r.size() > 400 ? (r.substr(0, 400) + "...") : r;
@@ -228,7 +202,6 @@ void print_tool_result(std::string_view result) {
 }
 
 void print_error(std::string_view msg) {
-    pause_point();
     set_color("31");
     std::cout << "[error] " << msg << '\n';
     reset_color();
@@ -368,7 +341,6 @@ TurnOutcome run_turn(http::Client& http, const llm::Provider& provider,
                         const std::vector<llm::ToolCall>& tool_calls_so_far) {
                         // Show text as it streams.
                         if (!text_delta.empty()) {
-                            pause_point();
                             printer.feed(text_delta);
                         }
                         // If tool calls appeared in the stream, show them immediately.
@@ -528,13 +500,13 @@ int main(int argc, char** argv) {
     Config cfg;
     if (!parse_args(argc, argv, cfg)) return 2;
 
-    // ── Setup pause/resume (Ctrl+S / Ctrl+Q) ──────────────────────
-    // This must happen before any output, and before we start the REPL,
-    // so that raw mode is active for the entire session.
-    bool has_pause = setup_raw_input();
-    if (has_pause) {
-        std::thread listener(pause_listener);
-        listener.detach();
+    // ── Terminal flow control (Ctrl+S / Ctrl+Q) ───────────────────
+    // We use the kernel's built-in IXON flow control.  No raw mode,
+    // no background thread, no interference with stdin.
+    // Just ensure IXON is enabled on the terminal.
+    bool has_flow_control = false;
+    if (isatty(STDIN_FILENO)) {
+        has_flow_control = ensure_ixon();
     }
 
     llm::Provider provider;
@@ -607,8 +579,10 @@ int main(int argc, char** argv) {
                              cfg.root.string());
     std::cout << "Type your prompt; submit with a line containing only '.', or Ctrl-D.\n";
     std::cout << "Commands: /help /model /provider /clear /tokens /snap /versions /back /undo /exit\n";
-    if (has_pause) {
-        std::cout << "Flow: Ctrl+S pause  Ctrl+Q resume\n";
+    if (has_flow_control) {
+        std::cout << "Flow: Ctrl+S pause  Ctrl+Q resume  (terminal flow control)\n";
+    } else {
+        std::cout << "Note: Ctrl+S/Ctrl+Q flow control unavailable (not a terminal or IXON disabled)\n";
     }
     std::cout << '\n';
 
@@ -762,8 +736,5 @@ int main(int argc, char** argv) {
         }
         std::cout << '\n';
     }
-
-    // Restore terminal before exit.
-    restore_termios();
     return 0;
 }
