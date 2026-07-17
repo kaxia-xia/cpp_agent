@@ -682,19 +682,27 @@ int main(int argc, char** argv) {
                 continue;
             }
             if (cmd == "/undo") {
+                // ── FIX: save the git hash of the version we are about to undo ──
+                // We must capture the hash BEFORE calling history.undo(), because
+                // undo() removes the last snapshot. After undo(), get_previous_commit_hash()
+                // would return the wrong hash (it would be the one before the restored
+                // version, not the one we want to roll back to).
+                std::string undo_hash;
+                if (git::is_available()) {
+                    undo_hash = history.get_last_commit_hash();
+                }
+
                 std::vector<llm::Message> restored;
                 if (history.undo(restored)) {
                     int cid = history.current_id();
                     messages = std::move(restored);
                     std::cout << std::format("[undone: back to version #{} ({} messages)]\n",
                                              cid, messages.size());
-                    // Also restore files to the previous git commit.
-                    if (git::is_available()) {
-                        std::string hash = history.get_previous_commit_hash();
-                        if (!hash.empty()) {
-                            if (git::reset_to_commit(cfg.root, hash)) {
-                                std::cout << "[git] files restored to previous snapshot\n";
-                            }
+                    // Restore files to the git commit that was associated with the
+                    // undone version (i.e. the version we just removed).
+                    if (git::is_available() && !undo_hash.empty()) {
+                        if (git::reset_to_commit(cfg.root, undo_hash)) {
+                            std::cout << "[git] files restored to previous snapshot\n";
                         }
                     }
                 }

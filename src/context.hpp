@@ -82,6 +82,14 @@ public:
         return snapshots_[snapshots_.size() - 2].git_commit_hash;
     }
 
+    // Get the git commit hash of the LAST (most recent) snapshot.
+    // This is used by /undo to capture the hash of the version being undone
+    // BEFORE it is removed from the history.
+    std::string get_last_commit_hash() const {
+        if (snapshots_.empty()) return {};
+        return snapshots_.back().git_commit_hash;
+    }
+
     // Convenience: undo the most recent version (restore the previous one).
     bool undo(std::vector<llm::Message>& out) {
         if (snapshots_.size() < 2) return false;
