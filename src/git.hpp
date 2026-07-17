@@ -169,7 +169,12 @@ inline std::string get_head_hash(const fs::path& root) {
 }
 
 // Reset the working tree to a specific commit hash.
-// Uses `git reset --hard` to restore both the index and working tree.
+// Uses `git reset --hard` to restore both the index and working tree,
+// then `git clean -fdx` to remove ALL untracked files, including those
+// that match .gitignore patterns.  This is necessary because the agent
+// may have created a .gitignore file that ignores some of its own
+// artifacts (e.g. build/).  When undoing/back, those artifacts must be
+// removed to fully restore the workspace to the target state.
 // Returns true on success.
 inline bool reset_to_commit(const fs::path& root, std::string_view hash) {
     if (hash.empty()) return false;
@@ -178,8 +183,9 @@ inline bool reset_to_commit(const fs::path& root, std::string_view hash) {
         std::cerr << std::format("[git] warning: reset --hard failed: {}\n", out);
         return false;
     }
-    // Also clean untracked files that were added by the agent.
-    run_git(root, "clean -fd");
+    // Remove ALL untracked files, including gitignored ones (-x).
+    // -f = force, -d = directories, -x = also remove gitignored files.
+    run_git(root, "clean -fdx");
     return true;
 }
 
