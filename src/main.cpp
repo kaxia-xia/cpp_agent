@@ -666,9 +666,14 @@ int main(int argc, char** argv) {
                     messages = std::move(restored);
                     std::cout << std::format("[rolled back to version #{} ({} messages)]\n",
                                              id, messages.size());
-                    // Also restore files to the matching git commit.
+                    // Restore files to the nearest git commit at or before the
+                    // target version.  We use get_nearest_commit_hash() instead of
+                    // get_commit_hash() because some snapshots (e.g. the initial
+                    // "init" snapshot, or turns that made no file changes) may not
+                    // have an associated git commit.  Walking backwards ensures we
+                    // always find a valid commit to reset to.
                     if (git::is_available()) {
-                        std::string hash = history.get_commit_hash(id);
+                        std::string hash = history.get_nearest_commit_hash(id);
                         if (!hash.empty()) {
                             if (git::reset_to_commit(cfg.root, hash)) {
                                 std::cout << "[git] files restored to snapshot #" << id << "\n";

@@ -90,6 +90,22 @@ public:
         return snapshots_.back().git_commit_hash;
     }
 
+    // Find the nearest git commit hash at or before the given snapshot id.
+    // Walks backwards from the given id until it finds a snapshot with a
+    // non-empty git_commit_hash.  This is used by /back to ensure we always
+    // have a valid commit to reset to, even if the target snapshot itself
+    // has no associated commit (e.g. the initial "init" snapshot or a turn
+    // that made no file changes).
+    std::string get_nearest_commit_hash(int id) const {
+        // Search backwards from the end so we find the latest snapshot <= id.
+        for (auto it = snapshots_.rbegin(); it != snapshots_.rend(); ++it) {
+            if (it->id <= id && !it->git_commit_hash.empty()) {
+                return it->git_commit_hash;
+            }
+        }
+        return {};
+    }
+
     // Convenience: undo the most recent version (restore the previous one).
     bool undo(std::vector<llm::Message>& out) {
         if (snapshots_.size() < 2) return false;
