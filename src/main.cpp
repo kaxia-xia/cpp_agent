@@ -33,47 +33,35 @@
 
 namespace fs = std::filesystem;
 
+// ── Global interrupt flag ────────────────────────────────────────────
+// Set to true by the SIGINT handler when the user presses Ctrl+C.
+// Checked by the HTTP client's progress callback to abort in-flight
+// requests, and by the main loop to decide whether to exit or just
+// cancel the current turn.
+static std::atomic<bool> g_interrupted{false};
+
+// SIGINT handler: set the interrupt flag.
+// In REPL mode, if we are waiting for user input (not in a turn),
+// the default SIGINT behaviour (exit) is preserved by checking the
+// flag at the right places.
+extern "C" void handle_sigint(int) {
+    g_interrupted.store(true, std::memory_order_release);
+}
+
 namespace {
 
 // ── Pause/Resume (Ctrl+S / Ctrl+Q) ───────────────────────────────────
 //
-// We use signal-based approach: SIGTSTP (Ctrl+Z typical) is NOT what we want.
-// Instead we use a background thread that polls the pause state via a pipe,
-// and we install a signal handler for SIGUSR1/SIGUSR2 triggered by... no,
-// that's too complex.
-//
-// Better approach: use the terminal's own IXON flow control.
-// When IXON is enabled (default), the terminal driver itself pauses output
-// on Ctrl+S and resumes on Ctrl+Q — at the kernel level, before the
-// application even sees the bytes.  This means:
-//   - No raw mode needed
-//   - No background thread eating stdin
-//   - No interference with normal input (getline, etc.)
-//   - Works automatically for ALL output (stdout, stderr)
-//
-// The only thing we need to do is ENSURE IXON is enabled on the terminal.
-// Some Termux setups or wrapper scripts may disable it.
-//
-// We also provide a visual indicator by checking if output is actually
-// blocked (by trying to write and seeing if it would block), but that's
-// complex.  Instead we just print a hint at startup and let the kernel
-// handle it transparently.
-
-// Check if IXON is enabled on stdin (the terminal).
-// If it is, Ctrl+S/Ctrl+Q flow control works automatically.
-
-// Try to enable IXON if it's disabled.  Returns true if IXON is active
-// after the call (either it was already on, or we successfully turned it on).
+// We use the kernel's built-in IXON flow control.  No raw mode,
+// no background thread, no interference with stdin.
+// Just ensure IXON is enabled on the terminal.
 bool ensure_ixon() {
     if (!isatty(STDIN_FILENO)) return false;
     struct termios t;
     if (tcgetattr(STDIN_FILENO, &t) != 0) return false;
     if (t.c_iflag & IXON) return true;  // already enabled
 
-    // Enable IXON.
     t.c_iflag |= IXON;
-    // Also set VSTART/VSTOP to the default Ctrl+Q / Ctrl+S if they are
-    // somehow changed.
     t.c_cc[VSTART] = 0x11;  // Ctrl+Q
     t.c_cc[VSTOP]  = 0x13;  // Ctrl+S
     if (tcsetattr(STDIN_FILENO, TCSANOW, &t) != 0) return false;
@@ -133,6 +121,8 @@ REPL COMMANDS
 FLOW CONTROL
   Ctrl+S      pause output (terminal flow control)
   Ctrl+Q      resume output
+  Ctrl+C      during AI response: cancel and return to prompt
+              at prompt: exit the program
 )";
 
 bool is_tty() { return ::isatty(STDOUT_FILENO) != 0; }
@@ -305,6 +295,7 @@ struct TurnOutcome {
     std::string final_text;
     long prompt_tokens = 0;
     long completion_tokens = 0;
+    bool interrupted = false;  // true if user pressed Ctrl+C during this turn
 };
 
 TurnOutcome run_turn(http::Client& http, const llm::Provider& provider,
@@ -317,6 +308,12 @@ TurnOutcome run_turn(http::Client& http, const llm::Provider& provider,
     constexpr int kMaxSameStreak = 3;
 
     for (int iter = 0; iter < cfg.max_iterations; ++iter) {
+        // Check for Ctrl+C interrupt before each LLM call.
+        if (g_interrupted.load(std::memory_order_acquire)) {
+            out.interrupted = true;
+            return out;
+        }
+
         llm::CompletionOptions opts;
         opts.model = cfg.model.empty() ? provider.default_model : cfg.model;
         opts.temperature = cfg.temperature;
@@ -334,6 +331,12 @@ TurnOutcome run_turn(http::Client& http, const llm::Provider& provider,
         bool has_tool_calls = false;
 
         for (int turn_attempt = 1; turn_attempt <= kTurnRetries; ++turn_attempt) {
+            // Check for interrupt before retry.
+            if (g_interrupted.load(std::memory_order_acquire)) {
+                out.interrupted = true;
+                return out;
+            }
+
             try {
                 res = llm::chat_completion_stream(
                     http, provider, opts, messages, tools_json, api_key,
@@ -343,13 +346,22 @@ TurnOutcome run_turn(http::Client& http, const llm::Provider& provider,
                         if (!text_delta.empty()) {
                             printer.feed(text_delta);
                         }
-                        // If tool calls appeared in the stream, show them immediately.
                         if (!tool_calls_so_far.empty()) {
                             has_tool_calls = true;
                         }
                     });
                 break;
             } catch (const std::exception& e) {
+                // If the user interrupted, don't retry.
+                if (g_interrupted.load(std::memory_order_acquire)) {
+                    out.interrupted = true;
+                    return out;
+                }
+                std::string what = e.what();
+                if (what.find("interrupted by user") != std::string::npos) {
+                    out.interrupted = true;
+                    return out;
+                }
                 if (!llm::is_transient(e)) throw;
                 if (turn_attempt < kTurnRetries) {
                     int wait = 30 * turn_attempt;
@@ -397,6 +409,12 @@ TurnOutcome run_turn(http::Client& http, const llm::Provider& provider,
         }
 
         for (const auto& tc : res.assistant.tool_calls) {
+            // Check for interrupt before executing each tool.
+            if (g_interrupted.load(std::memory_order_acquire)) {
+                out.interrupted = true;
+                return out;
+            }
+
             print_tool_call(tc.function_name, tc.arguments);
             std::string result = tools::execute(tc.function_name, tc.arguments, cfg.root);
             print_tool_result(result);
@@ -430,7 +448,6 @@ TurnOutcome run_turn(http::Client& http, const llm::Provider& provider,
 
 // ── Git integration ───────────────────────────────────────────────────
 
-// Initialise git at startup: check availability, ensure a repo exists.
 void init_git(const fs::path& root) {
     if (!git::is_available()) {
         std::cerr << std::format(
@@ -446,28 +463,19 @@ void init_git(const fs::path& root) {
     }
 }
 
-// After a turn completes, commit any file changes that the agent made.
-// Only files that were NOT already dirty before the turn are committed.
 std::string auto_commit(const fs::path& root, std::string_view label,
                  const std::set<std::string>& dirty_before) {
-    if (!git::is_available()) return {};  // already warned at startup
-    // Show a brief status message so the user knows something is happening.
+    if (!git::is_available()) return {};
     set_color("2");
     std::cerr << "[git] committing changes... " << std::flush;
     reset_color();
     return git::commit_changes(root, label, dirty_before);
-    std::cerr << "\r\033[K";  // clear the status line
+    std::cerr << "\r\033[K";
     std::cerr << std::flush;
 }
 
 // ── REPL input reader ────────────────────────────────────────────────
-//
-// Reads one prompt from stdin.  Returns true if a prompt was read.
-// The prompt is terminated by a line containing only "." or by EOF.
-// On EOF with no input, returns false (caller should exit).
-//
-// This function handles both interactive (tty) and pipe modes correctly.
-//
+
 bool read_prompt(std::string& prompt) {
     prompt.clear();
     bool got_any = false;
@@ -475,7 +483,6 @@ bool read_prompt(std::string& prompt) {
 
     while (std::getline(std::cin, line)) {
         if (line == ".") {
-            // Terminator line: stop reading.
             break;
         }
         if (!prompt.empty()) prompt.push_back('\n');
@@ -484,11 +491,8 @@ bool read_prompt(std::string& prompt) {
     }
 
     if (std::cin.eof()) {
-        // Clear EOF so subsequent reads work (important for pipe mode).
         std::cin.clear();
-        // If we got nothing at all, it's a real EOF → signal exit.
         if (!got_any) return false;
-        // Otherwise we have a prompt (user typed something then Ctrl-D).
     }
 
     return got_any;
@@ -500,10 +504,18 @@ int main(int argc, char** argv) {
     Config cfg;
     if (!parse_args(argc, argv, cfg)) return 2;
 
+    // ── Install SIGINT handler ────────────────────────────────────
+    // During AI response: Ctrl+C sets g_interrupted, which aborts the
+    // HTTP request via libcurl's progress callback and causes run_turn
+    // to return early.  At the prompt: Ctrl+C will be caught after
+    // read_prompt returns (it will see g_interrupted and exit).
+    struct sigaction sa{};
+    sa.sa_handler = handle_sigint;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, nullptr);
+
     // ── Terminal flow control (Ctrl+S / Ctrl+Q) ───────────────────
-    // We use the kernel's built-in IXON flow control.  No raw mode,
-    // no background thread, no interference with stdin.
-    // Just ensure IXON is enabled on the terminal.
     bool has_flow_control = false;
     if (isatty(STDIN_FILENO)) {
         has_flow_control = ensure_ixon();
@@ -535,6 +547,10 @@ int main(int argc, char** argv) {
     init_git(cfg.root);
 
     http::Client http;
+    // Pass the interrupt flag to the HTTP client so libcurl's progress
+    // callback can abort in-flight requests when the user presses Ctrl+C.
+    http.set_interrupt_flag(&g_interrupted);
+
     const json::Value tools_json = tools::tool_schemas();
 
     std::vector<llm::Message> messages;
@@ -549,7 +565,6 @@ int main(int argc, char** argv) {
         }
         messages.push_back(llm::Message::user(cfg.initial_prompt));
 
-        // Snapshot dirty files before the turn so we only commit agent changes.
         std::set<std::string> dirty_before;
         if (git::is_available()) {
             dirty_before = git::get_dirty_files(cfg.root);
@@ -562,7 +577,6 @@ int main(int argc, char** argv) {
             std::cerr << std::format("\n[tokens: in={}, out={}]\n", total_prompt, total_completion);
         } catch (const std::exception& e) {
             print_error(e.what());
-            // Even on error, commit any partial file changes the agent made.
             auto_commit(cfg.root, snap_label(cfg.initial_prompt), dirty_before);
             return 1;
         }
@@ -571,8 +585,6 @@ int main(int argc, char** argv) {
     }
 
     // ── Initialise history with the current HEAD hash ────────────
-    // This ensures that /back 1 (or any /back to the init snapshot) can
-    // always restore files to the initial workspace state.
     context::History history;
     {
         std::string init_hash;
@@ -593,16 +605,27 @@ int main(int argc, char** argv) {
     } else {
         std::cout << "Note: Ctrl+S/Ctrl+Q flow control unavailable (not a terminal or IXON disabled)\n";
     }
+    std::cout << "Interrupt: Ctrl+C during AI response to cancel, at prompt to exit\n";
     std::cout << '\n';
 
     std::string prompt;
     while (true) {
+        // Reset the interrupt flag at the start of each prompt cycle.
+        g_interrupted.store(false, std::memory_order_release);
+
         // Print the prompt indicator.
         set_color("35"); std::cout << "> " << std::flush; reset_color();
 
-        // Read user input using the helper that handles EOF correctly.
+        // Read user input.
         if (!read_prompt(prompt)) {
             // True EOF (Ctrl-D on empty line) → exit.
+            std::cout << "\n";
+            break;
+        }
+
+        // If the user pressed Ctrl+C during read_prompt (no input was read),
+        // treat it as exit.
+        if (prompt.empty() && g_interrupted.load(std::memory_order_acquire)) {
             std::cout << "\n";
             break;
         }
@@ -679,10 +702,6 @@ int main(int argc, char** argv) {
                     messages = std::move(restored);
                     std::cout << std::format("[rolled back to version #{} ({} messages)]\n",
                                              id, messages.size());
-                    // Restore files to the git commit associated with the target
-                    // snapshot.  If the snapshot has no git hash (e.g. a turn that
-                    // made no file changes), walk backwards to find the nearest
-                    // snapshot that does — the file state is the same.
                     if (git::is_available()) {
                         std::string hash = history.get_commit_hash(id);
                         if (hash.empty()) {
@@ -701,9 +720,6 @@ int main(int argc, char** argv) {
                 continue;
             }
             if (cmd == "/undo") {
-                // Capture the git hash of the version we are about to undo
-                // BEFORE calling history.undo(), because undo() removes the
-                // last snapshot from the history.
                 std::string undo_hash;
                 if (git::is_available()) {
                     undo_hash = history.get_last_commit_hash();
@@ -715,8 +731,6 @@ int main(int argc, char** argv) {
                     messages = std::move(restored);
                     std::cout << std::format("[undone: back to version #{} ({} messages)]\n",
                                              cid, messages.size());
-                    // Restore files to the git commit that was associated with the
-                    // undone version (i.e. the version we just removed).
                     if (git::is_available() && !undo_hash.empty()) {
                         if (git::reset_to_commit(cfg.root, undo_hash)) {
                             std::cout << "[git] files restored to previous snapshot\n";
@@ -735,24 +749,47 @@ int main(int argc, char** argv) {
         // ── Process user prompt ───────────────────────────────────
         messages.push_back(llm::Message::user(prompt));
 
-        // Snapshot dirty files before the turn so we only commit agent changes.
         std::set<std::string> dirty_before;
         if (git::is_available()) {
             dirty_before = git::get_dirty_files(cfg.root);
         }
 
+        bool turn_interrupted = false;
         try {
             TurnOutcome out = run_turn(http, provider, cfg, messages, tools_json, api_key);
             total_prompt += out.prompt_tokens;
             total_completion += out.completion_tokens;
-            std::cout << std::format("[{} in / {} out]\n", out.prompt_tokens, out.completion_tokens);
+            turn_interrupted = out.interrupted;
+            if (!out.interrupted) {
+                std::cout << std::format("[{} in / {} out]\n", out.prompt_tokens, out.completion_tokens);
+            }
         } catch (const llm::LLMError& e) {
             print_error(e.what());
             if (!messages.empty() && messages.back().role == "user") messages.pop_back();
         } catch (const std::exception& e) {
             print_error(e.what());
         }
-        // Auto-commit any file changes made during this turn, even on error.
+
+        // If the turn was interrupted by Ctrl+C, do NOT auto-commit
+        // (the agent's changes may be partial/incomplete).  Also
+        // remove the user's prompt message so the conversation stays
+        // clean.
+        if (turn_interrupted) {
+            set_color("33");
+            std::cout << "[cancelled]\n";
+            reset_color();
+            if (!messages.empty() && messages.back().role == "user") {
+                messages.pop_back();
+            }
+            // Also remove any partial assistant/tool messages that may
+            // have been added before the interrupt.
+            while (!messages.empty() && messages.back().role != "user" && messages.back().role != "system") {
+                messages.pop_back();
+            }
+            continue;
+        }
+
+        // Auto-commit any file changes made during this turn.
         std::string commit_hash = auto_commit(cfg.root, snap_label(prompt), dirty_before);
         if (!commit_hash.empty()) {
             history.save(messages, snap_label(prompt), commit_hash);

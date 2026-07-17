@@ -1,7 +1,9 @@
 // http.hpp - thin libcurl wrapper for JSON POST requests, with automatic
-// retry on transient connection failures.
+// retry on transient connection failures.  Supports external interrupt
+// via an atomic flag (for Ctrl+C cancellation).
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <curl/curl.h>
 #include <format>
@@ -59,6 +61,20 @@ struct RetryPolicy {
     bool verbose          = true;
 };
 
+// Progress callback used by libcurl to poll for external interrupt.
+// libcurl calls this frequently during data transfer.  Returning a
+// non-zero value causes curl to abort the transfer with
+// CURLE_ABORTED_BY_CALLBACK.
+// The parameter names are kept to match the libcurl callback signature.
+inline int progress_callback(void* clientp, curl_off_t /*dltotal*/, curl_off_t /*dlnow*/,
+                             curl_off_t /*ultotal*/, curl_off_t /*ulnow*/) {
+    auto* flag = static_cast<std::atomic<bool>*>(clientp);
+    if (flag && flag->load(std::memory_order_relaxed)) {
+        return 1;  // abort
+    }
+    return 0;
+}
+
 class Client {
 public:
     Client() {
@@ -83,6 +99,14 @@ public:
         set_header("Authorization", std::format("Bearer {}", token));
     }
 
+    // Set an atomic flag that libcurl will poll during transfers.
+    // When the flag becomes true, the in-flight transfer is aborted
+    // with CURLE_ABORTED_BY_CALLBACK.  This enables Ctrl+C to
+    // interrupt a long-running LLM request.
+    void set_interrupt_flag(std::atomic<bool>* flag) {
+        interrupt_flag_ = flag;
+    }
+
     struct AttemptResult {
         Response response;
         CURLcode curl_code = CURLE_OK;
@@ -105,6 +129,11 @@ public:
         curl_easy_setopt(curl_, CURLOPT_WRITEFUNCTION, &Client::write_cb);
         curl_easy_setopt(curl_, CURLOPT_WRITEDATA, &body_buf);
         curl_easy_setopt(curl_, CURLOPT_ERRORBUFFER, errbuf);
+        curl_easy_setopt(curl_, CURLOPT_NOSIGNAL, 1L);
+        // Install progress callback for interrupt support.
+        curl_easy_setopt(curl_, CURLOPT_XFERINFOFUNCTION, progress_callback);
+        curl_easy_setopt(curl_, CURLOPT_XFERINFODATA, interrupt_flag_);
+        curl_easy_setopt(curl_, CURLOPT_NOPROGRESS, 0L);
 
         out.curl_code = curl_easy_perform(curl_);
         if (out.curl_code == CURLE_OK) {
@@ -120,11 +149,22 @@ public:
                  const RetryPolicy& policy = RetryPolicy{}) {
         AttemptResult last;
         for (int attempt = 1; attempt <= policy.max_attempts; ++attempt) {
+            // Check for interrupt before each retry attempt.
+            if (interrupt_flag_ && interrupt_flag_->load(std::memory_order_relaxed)) {
+                throw RequestError("interrupted by user");
+            }
+
             last = get_once(url, timeout_seconds);
 
             if (last.curl_code == CURLE_OK &&
                 last.response.status >= 200 && last.response.status < 300) {
                 return std::move(last.response);
+            }
+
+            // If the transfer was aborted by our progress callback (Ctrl+C),
+            // do not retry.
+            if (last.curl_code == CURLE_ABORTED_BY_CALLBACK) {
+                throw RequestError("interrupted by user");
             }
 
             bool transport_retriable = is_retriable_curlcode(last.curl_code);
@@ -183,6 +223,11 @@ public:
         curl_easy_setopt(curl_, CURLOPT_WRITEFUNCTION, &Client::write_cb);
         curl_easy_setopt(curl_, CURLOPT_WRITEDATA, &body_buf);
         curl_easy_setopt(curl_, CURLOPT_ERRORBUFFER, errbuf);
+        curl_easy_setopt(curl_, CURLOPT_NOSIGNAL, 1L);
+        // Install progress callback for interrupt support.
+        curl_easy_setopt(curl_, CURLOPT_XFERINFOFUNCTION, progress_callback);
+        curl_easy_setopt(curl_, CURLOPT_XFERINFODATA, interrupt_flag_);
+        curl_easy_setopt(curl_, CURLOPT_NOPROGRESS, 0L);
 
         out.curl_code = curl_easy_perform(curl_);
         if (out.curl_code == CURLE_OK) {
@@ -200,11 +245,22 @@ public:
 
         AttemptResult last;
         for (int attempt = 1; attempt <= policy.max_attempts; ++attempt) {
+            // Check for interrupt before each retry attempt.
+            if (interrupt_flag_ && interrupt_flag_->load(std::memory_order_relaxed)) {
+                throw RequestError("interrupted by user");
+            }
+
             last = post_once(url, timeout_seconds);
 
             if (last.curl_code == CURLE_OK &&
                 last.response.status >= 200 && last.response.status < 300) {
                 return std::move(last.response);
+            }
+
+            // If the transfer was aborted by our progress callback (Ctrl+C),
+            // do not retry.
+            if (last.curl_code == CURLE_ABORTED_BY_CALLBACK) {
+                throw RequestError("interrupted by user");
             }
 
             bool transport_retriable = is_retriable_curlcode(last.curl_code);
@@ -270,6 +326,7 @@ private:
     CURL* curl_{nullptr};
     curl_slist* headers_{nullptr};
     std::string post_body_;
+    std::atomic<bool>* interrupt_flag_{nullptr};
 };
 
 } // namespace http
