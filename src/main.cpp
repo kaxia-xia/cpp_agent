@@ -570,8 +570,17 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    // ── Initialise history with the current HEAD hash ────────────
+    // This ensures that /back 1 (or any /back to the init snapshot) can
+    // always restore files to the initial workspace state.
     context::History history;
-    history.save(messages, "init");
+    {
+        std::string init_hash;
+        if (git::is_available()) {
+            init_hash = git::get_head_hash(cfg.root);
+        }
+        history.save(messages, "init", init_hash);
+    }
 
     std::cout << std::format("coding-agent  provider={}  model={}  root={}\n",
                              provider.name,
@@ -609,7 +618,11 @@ int main(int argc, char** argv) {
                 messages.clear();
                 messages.push_back(llm::Message::system(build_system_prompt(cfg.root)));
                 history.clear();
-                history.save(messages, "init");
+                std::string init_hash;
+                if (git::is_available()) {
+                    init_hash = git::get_head_hash(cfg.root);
+                }
+                history.save(messages, "init", init_hash);
                 std::cout << "[conversation cleared]\n";
                 continue;
             }
@@ -666,14 +679,15 @@ int main(int argc, char** argv) {
                     messages = std::move(restored);
                     std::cout << std::format("[rolled back to version #{} ({} messages)]\n",
                                              id, messages.size());
-                    // Restore files to the nearest git commit at or before the
-                    // target version.  We use get_nearest_commit_hash() instead of
-                    // get_commit_hash() because some snapshots (e.g. the initial
-                    // "init" snapshot, or turns that made no file changes) may not
-                    // have an associated git commit.  Walking backwards ensures we
-                    // always find a valid commit to reset to.
+                    // Restore files to the git commit associated with the target
+                    // snapshot.  If the snapshot has no git hash (e.g. a turn that
+                    // made no file changes), walk backwards to find the nearest
+                    // snapshot that does — the file state is the same.
                     if (git::is_available()) {
-                        std::string hash = history.get_nearest_commit_hash(id);
+                        std::string hash = history.get_commit_hash(id);
+                        if (hash.empty()) {
+                            hash = history.get_nearest_commit_hash(id);
+                        }
                         if (!hash.empty()) {
                             if (git::reset_to_commit(cfg.root, hash)) {
                                 std::cout << "[git] files restored to snapshot #" << id << "\n";
@@ -687,11 +701,9 @@ int main(int argc, char** argv) {
                 continue;
             }
             if (cmd == "/undo") {
-                // ── FIX: save the git hash of the version we are about to undo ──
-                // We must capture the hash BEFORE calling history.undo(), because
-                // undo() removes the last snapshot. After undo(), get_previous_commit_hash()
-                // would return the wrong hash (it would be the one before the restored
-                // version, not the one we want to roll back to).
+                // Capture the git hash of the version we are about to undo
+                // BEFORE calling history.undo(), because undo() removes the
+                // last snapshot from the history.
                 std::string undo_hash;
                 if (git::is_available()) {
                     undo_hash = history.get_last_commit_hash();
