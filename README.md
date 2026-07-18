@@ -67,6 +67,97 @@ Agent 模型可通过 Function Calling 机制调用以下 **38 个工具**，自
 | `plot_chart` | 根据数据生成图表（柱状图/折线图/饼图/散点图） |
 | `finish` | 标记任务完成并返回最终答复 |
 
+### 🧩 新增工具详解
+
+#### 📱 Termux 特色工具（需安装 termux-api）
+
+以下工具利用 Termux:API 与 Android 系统交互，让 Agent 突破终端限制：
+
+| 工具 | 依赖 | 说明 |
+|------|------|------|
+| `clipboard` | `termux-clipboard-get/set` | 读写系统剪贴板，Agent 可直接把代码放剪贴板 |
+| `notify` | `termux-notification` | 发送通知到通知栏，长时间任务完成时提醒 |
+| `speak` | `termux-tts-speak` | 文字转语音，Agent 能"开口说话" |
+| `vibrate` | `termux-vibrate` | 震动反馈，出错或完成时震动提醒 |
+| `screenshot` | `termux-screencap` | 截取屏幕，结合 `ocr` 可分析屏幕内容 |
+| `system_info` | `termux-battery-status` | 获取电池/CPU/内存/存储/网络信息 |
+
+> 安装：`pkg install termux-api` 即可获得以上所有功能
+
+#### 🔍 OCR 文字识别
+
+基于 **Tesseract OCR** 引擎，支持多语言识别：
+
+```bash
+# 安装（已预装）
+pkg install tesseract
+
+# 当前支持的语言
+tesseract --list-langs
+# 输出: chi_sim  eng
+```
+
+| 语言参数 | 说明 |
+|----------|------|
+| `lang="eng"` | 英文识别（默认） |
+| `lang="chi_sim"` | 简体中文识别 |
+| `lang="eng+chi_sim"` | 中英文混合识别 |
+
+> 如需更多语言，从 [tesseract-ocr/tessdata](https://github.com/tesseract-ocr/tessdata) 下载 `.traineddata` 文件放到 `/data/data/com.termux/files/usr/share/tessdata/` 目录
+
+#### 🐍 run_python — 快速执行 Python
+
+预导入常用库，无需写 import：
+
+```python
+# 自动已导入：sys, json, math, random, datetime, os, re, collections, itertools, statistics
+result = sum(range(1000))
+print(f"计算结果: {result}")
+```
+
+#### 📈 plot_chart — 数据可视化
+
+支持四种图表类型，数据以 JSON 格式传入：
+
+```json
+// 柱状图/折线图
+{"labels": ["A","B","C"], "values": [10, 20, 15], "xlabel": "类别", "ylabel": "数量"}
+
+// 饼图
+{"labels": ["苹果","香蕉","橘子"], "values": [30, 20, 15]}
+
+// 散点图
+{"x": [1,2,3,4,5], "y": [2,4,1,5,3], "xlabel": "X轴", "ylabel": "Y轴"}
+```
+
+#### 🌤️ weather — 天气查询
+
+基于 [wttr.in](https://wttr.in) 服务，无需 API Key：
+
+- 不传 `location` → 自动根据 IP 定位
+- `location="Beijing"` → 查询指定城市
+- `location="39.9,116.4"` → 查询坐标位置
+
+#### 🎮 组合技示例
+
+```
+screenshot → ocr → "屏幕上显示编译错误：..."
+                → notify "发现编译错误！"
+                → speak "主人，代码出问题了，我来修复"
+                → vibrate (震动提醒你)
+```
+
+```
+clipboard (get) → "获取剪贴板中的代码"
+                → run_python "分析这段代码..."
+                → clipboard (set) "把优化后的代码放回剪贴板"
+```
+
+```
+weather → "今天下雨，不适合出门"
+        → "正好在家写代码！"
+```
+
 ### 🔒 路径沙箱保护
 
 所有文件操作均限制在工作区根目录下，拒绝 `..` 路径穿越，安全可靠。
@@ -338,7 +429,7 @@ cpp_agent/
 
 ## 🧠 工作原理
 
-1. **系统提示词**：启动时根据工作区根目录生成系统提示，告知模型可用工具（共 38 个）与行为准则（先探索再修改、用 `write_file` 落地改动、用 `run_command` 验证构建/测试等）。
+1. **系统提示词**：启动时根据工作区根目录生成系统提示，告知模型可用工具（共 38 个，详见上方工具集表格）与行为准则（先探索再修改、用 `write_file` 落地改动、用 `run_command` 验证构建/测试等）。
 2. **Agent 循环**（`run_turn`）：
    - 将完整对话历史 + 工具 schema 发送给 LLM 的 `/chat/completions` 接口。
    - 若返回 `tool_calls`，逐个执行并把结果以 `tool` 角色消息回填到历史。
