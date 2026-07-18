@@ -80,7 +80,12 @@ Agent 模型可通过 Function Calling 机制调用以下 **38 个工具**，自
 | `screenshot` | `termux-screencap` | 截取屏幕，结合 `ocr` 可分析屏幕内容 |
 | `system_info` | `termux-battery-status` | 获取电池/CPU/内存/存储/网络信息 |
 
-> 安装：`pkg install termux-api` 即可获得以上所有功能
+> ⚠️ **安装步骤**：
+> 1. `pkg install termux-api` — 安装命令行工具
+> 2. 下载安装 **Termux:API Android App**（[F-Droid](https://f-droid.org/packages/com.termux.api/) 或 [GitHub](https://github.com/termux/termux-api/releases)）
+> 3. 在系统设置中授予 Termux:API **通知、剪贴板**等权限
+>
+> 缺少第 2 步会导致工具调用卡住或失败！
 
 #### 🔍 OCR 文字识别
 
@@ -227,10 +232,30 @@ weather → "今天下雨，不适合出门"
 
 ## 🔧 安装依赖（Termux）
 
+### 1️⃣ 基础编译依赖
+
 ```bash
 pkg update
 pkg install clang cmake libcurl git libandroid-spawn
 ```
+
+### 2️⃣ Agent 工具依赖（按需安装）
+
+Agent 的 37 个工具中，部分需要额外安装软件才能使用。以下是完整清单：
+
+| 工具 | 所需安装 | 说明 |
+|------|----------|------|
+| `notify` / `clipboard` / `vibrate` / `screenshot` / `system_info` | `pkg install termux-api` | 需同时安装 **Termux:API Android App**（[F-Droid](https://f-droid.org/packages/com.termux.api/) 或 [GitHub Releases](https://github.com/termux/termux-api/releases)），否则这些工具会卡住或失败 ❗ |
+| `ocr` | `pkg install tesseract` | 已预装 `eng`（英文）和 `chi_sim`（简体中文）语言包 |
+| `qr_encode` / `qr_decode` | `pkg install python` + `pip install qrcode pyzbar` | 二维码生成与解码 |
+| `plot_chart` | `pkg install python` + `pip install matplotlib` | 数据可视化图表 |
+| `render_mermaid` | `npm install -g @mermaid-js/mermaid-cli` | Mermaid 图表渲染为 SVG |
+| `image_info` / `image_convert` / `image_to_svg` | `pkg install python` + `pip install Pillow` | 图片处理 |
+| `weather` | 无需安装 | 基于 wttr.in 在线服务 |
+| `fetch_url` / `parse_html` / `parse_xml` / `parse_json` | 无需安装 | 内置功能 |
+| 文件操作类工具（`read_file` / `write_file` / `run_command` 等） | 无需安装 | 内置功能 |
+
+> ⚠️ **重要提醒**：`termux-api` 包安装后，还需要去 [F-Droid](https://f-droid.org/packages/com.termux.api/) 或 [GitHub](https://github.com/termux/termux-api/releases) **下载安装 Termux:API Android App**，并在系统设置中授予其通知、剪贴板等权限。仅 `pkg install termux-api` 是不够的！
 
 ---
 
