@@ -439,6 +439,188 @@ inline json::Value tool_schemas() {
             std::move(p)));
     }
 
+
+    // 16. fetch_url - HTTP GET a URL and return the body
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object url_p; url_p["type"] = json::Value{"string"};
+        url_p["description"] = json::Value{"URL to fetch (http:// or https://)."};
+        props["url"] = json::Value{std::move(url_p)};
+        json::Object to_p; to_p["type"] = json::Value{"integer"};
+        to_p["description"] = json::Value{"Timeout in seconds (default 30)."};
+        to_p["default"] = json::Value{30};
+        props["timeout"] = json::Value{std::move(to_p)};
+        json::Object maxb_p; maxb_p["type"] = json::Value{"integer"};
+        maxb_p["description"] = json::Value{"Max bytes to return (default 200000)."};
+        maxb_p["default"] = json::Value{200000};
+        props["max_bytes"] = json::Value{std::move(maxb_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"url"});
+        tools.push_back(fn("fetch_url",
+            "Fetch a URL via HTTP GET and return the response body. "
+            "Useful for reading web pages, APIs, raw text from the internet. "
+            "Returns status code and body content.",
+            std::move(p)));
+    }
+
+    // 17. parse_html - parse HTML and extract text or specific elements
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object html_p; html_p["type"] = json::Value{"string"};
+        html_p["description"] = json::Value{"HTML content to parse."};
+        props["html"] = json::Value{std::move(html_p)};
+        json::Object query_p; query_p["type"] = json::Value{"string"};
+        query_p["description"] = json::Value{"CSS selector or 'text' to extract all text, or 'links' to extract all links."};
+        query_p["default"] = json::Value{"text"};
+        props["query"] = json::Value{std::move(query_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"html"});
+        tools.push_back(fn("parse_html",
+            "Parse HTML content and extract information. "
+            "Use query='text' to get all visible text, query='links' to get all links, "
+            "or a CSS selector like 'h1', '.class', '#id', 'div p' to extract specific elements. "
+            "Uses python3 with html.parser internally.",
+            std::move(p)));
+    }
+
+    // 18. parse_xml - parse XML and extract text or specific elements
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object xml_p; xml_p["type"] = json::Value{"string"};
+        xml_p["description"] = json::Value{"XML content to parse."};
+        props["xml"] = json::Value{std::move(xml_p)};
+        json::Object xpath_p; xpath_p["type"] = json::Value{"string"};
+        xpath_p["description"] = json::Value{"XPath expression or 'text' to extract all text, or 'structure' to show the XML tree structure."};
+        xpath_p["default"] = json::Value{"text"};
+        props["xpath"] = json::Value{std::move(xpath_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"xml"});
+        tools.push_back(fn("parse_xml",
+            "Parse XML content and extract information. "
+            "Uses python3 with xml.etree.ElementTree internally. "
+            "Supports basic XPath expressions.",
+            std::move(p)));
+    }
+
+    // 19. parse_json - parse and query JSON content
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object json_p; json_p["type"] = json::Value{"string"};
+        json_p["description"] = json::Value{"JSON content to parse."};
+        props["json"] = json::Value{std::move(json_p)};
+        json::Object query_p; query_p["type"] = json::Value{"string"};
+        query_p["description"] = json::Value{"Dot-separated path to extract (e.g. 'data.items[0].name'), or empty to pretty-print the whole JSON."};
+        query_p["default"] = json::Value{""};
+        props["query"] = json::Value{std::move(query_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"json"});
+        tools.push_back(fn("parse_json",
+            "Parse and query JSON content. "
+            "Use query='' to pretty-print the entire JSON. "
+            "Use dot-separated paths like 'store.book[0].title' to extract specific values. "
+            "Supports array indexing with [n].",
+            std::move(p)));
+    }
+
+    // 20. render_mermaid - convert Mermaid diagram definition to SVG image file
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object mermaid_p; mermaid_p["type"] = json::Value{"string"};
+        mermaid_p["description"] = json::Value{"Mermaid diagram definition (the content after the ```mermaid block)."};
+        props["mermaid"] = json::Value{std::move(mermaid_p)};
+        json::Object output_p; output_p["type"] = json::Value{"string"};
+        output_p["description"] = json::Value{"Output SVG file path (relative to workspace root)."};
+        props["output"] = json::Value{std::move(output_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"mermaid", "output"});
+        tools.push_back(fn("render_mermaid",
+            "Convert a Mermaid diagram definition to an SVG image file. "
+            "Requires mmdc (mermaid-cli) to be installed. "
+            "If mmdc is not available, falls back to generating a text-based diagram description.",
+            std::move(p)));
+    }
+
+    // 21. image_info - get metadata about an image file
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object path_p; path_p["type"] = json::Value{"string"};
+        path_p["description"] = json::Value{"Path to image file (relative to workspace root)."};
+        props["path"] = json::Value{std::move(path_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"path"});
+        tools.push_back(fn("image_info",
+            "Get metadata about an image file: format, dimensions, color mode, file size. "
+            "Supports PNG, JPEG, GIF, BMP, WebP and other common formats. "
+            "Uses python3 with PIL (Pillow) internally.",
+            std::move(p)));
+    }
+
+    // 22. image_convert - convert image between formats or resize
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object src_p; src_p["type"] = json::Value{"string"};
+        src_p["description"] = json::Value{"Source image path."};
+        props["source"] = json::Value{std::move(src_p)};
+        json::Object dst_p; dst_p["type"] = json::Value{"string"};
+        dst_p["description"] = json::Value{"Destination image path (extension determines format)."};
+        props["destination"] = json::Value{std::move(dst_p)};
+        json::Object width_p; width_p["type"] = json::Value{"integer"};
+        width_p["description"] = json::Value{"Resize width (optional, keeps aspect ratio if only width or height given)."};
+        width_p["default"] = json::Value{0};
+        props["width"] = json::Value{std::move(width_p)};
+        json::Object height_p; height_p["type"] = json::Value{"integer"};
+        height_p["description"] = json::Value{"Resize height (optional)."};
+        height_p["default"] = json::Value{0};
+        props["height"] = json::Value{std::move(height_p)};
+        json::Object quality_p; quality_p["type"] = json::Value{"integer"};
+        quality_p["description"] = json::Value{"Output quality 1-100 (default 85, for JPEG/WebP)."};
+        quality_p["default"] = json::Value{85};
+        props["quality"] = json::Value{std::move(quality_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"source", "destination"});
+        tools.push_back(fn("image_convert",
+            "Convert an image between formats or resize it. "
+            "Output format is determined by the destination file extension "
+            "(e.g. .png, .jpg, .gif, .bmp, .webp). "
+            "Uses python3 with PIL (Pillow) internally.",
+            std::move(p)));
+    }
+
+    // 23. image_to_svg - convert bitmap image to SVG (trace/vectorize)
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object src_p; src_p["type"] = json::Value{"string"};
+        src_p["description"] = json::Value{"Source image path (PNG, JPEG, etc.)."};
+        props["source"] = json::Value{std::move(src_p)};
+        json::Object dst_p; dst_p["type"] = json::Value{"string"};
+        dst_p["description"] = json::Value{"Output SVG file path."};
+        props["destination"] = json::Value{std::move(dst_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"source", "destination"});
+        tools.push_back(fn("image_to_svg",
+            "Convert a bitmap image to SVG format by embedding it as a base64 data URI. "
+            "This creates a valid SVG that displays the original image. "
+            "For true vectorization, use run_command with 'potrace' or online tools. "
+            "Uses python3 with PIL internally.",
+            std::move(p)));
+    }
+
     return json::Value{std::move(tools)};
 }
 
@@ -862,6 +1044,424 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             }
             ss << std::format("[summary: {} ok, {} errors]", ok_count, err_count);
             return ss.str();
+        }
+
+
+        // ── fetch_url ────────────────────────────────────────────────
+        if (name == "fetch_url") {
+            std::string url = get_str("url");
+            if (url.empty()) return "[tool error: 'url' required]";
+            int timeout = std::clamp(get_int("timeout", 30), 5, 120);
+            size_t max_bytes = static_cast<size_t>(std::max(1024, get_int("max_bytes", 200000)));
+
+            std::string escaped_url;
+            for (char c : url) {
+                if (c == '\'') escaped_url += "'\\''";
+                else escaped_url.push_back(c);
+            }
+            std::string cmd = std::format("curl -sL --max-time {} '{}' 2>/dev/null || true", timeout, escaped_url);
+            ShellResult r = run_shell(cmd, root, timeout + 10);
+
+            std::string status_cmd = "curl -sL -o /dev/null -w '%{http_code}' --max-time " + std::to_string(timeout) + " '" + escaped_url + "' 2>/dev/null || echo '000'";
+            ShellResult status_r = run_shell(status_cmd, root, timeout + 10);
+            std::string status_code = status_r.output;
+            while (!status_code.empty() && (status_code.back() == '\n' || status_code.back() == '\r'))
+                status_code.pop_back();
+
+            std::string result = r.output;
+            size_t total = result.size();
+            if (result.size() > max_bytes) {
+                result = result.substr(0, max_bytes);
+            }
+
+            std::ostringstream ss;
+            ss << std::format("[HTTP {} | {} bytes", status_code, total);
+            if (total > max_bytes) ss << std::format(" (showing first {})", max_bytes);
+            ss << "]\n";
+            ss << result;
+            return ss.str();
+        }
+
+        // ── parse_html ───────────────────────────────────────────────
+        if (name == "parse_html") {
+            std::string html = get_str("html");
+            std::string query = get_str("query");
+            if (html.empty()) return "[tool error: 'html' required]";
+            if (query.empty()) query = "text";
+
+            std::string py_script;
+            if (query == "text") {
+                py_script = "import html.parser, sys\n"
+                    "class T(html.parser.HTMLParser):\n"
+                    "  def __init__(self):\n"
+                    "    super().__init__()\n"
+                    "    self.text = []\n"
+                    "    self.skip = False\n"
+                    "  def handle_starttag(self, tag, attrs):\n"
+                    "    if tag in ('script','style'): self.skip = True\n"
+                    "  def handle_endtag(self, tag):\n"
+                    "    if tag in ('script','style'): self.skip = False\n"
+                    "  def handle_data(self, data):\n"
+                    "    if not self.skip:\n"
+                    "      data = data.strip()\n"
+                    "      if data: self.text.append(data)\n"
+                    "p = T()\n"
+                    "p.feed(sys.stdin.read())\n"
+                    "print('\\n'.join(p.text))\n";
+            } else if (query == "links") {
+                py_script = "import html.parser, sys\n"
+                    "class L(html.parser.HTMLParser):\n"
+                    "  def __init__(self):\n"
+                    "    super().__init__()\n"
+                    "    self.links = []\n"
+                    "  def handle_starttag(self, tag, attrs):\n"
+                    "    if tag == 'a':\n"
+                    "      d = dict(attrs)\n"
+                    "      self.cap = d.get('href','')\n"
+                    "    else: self.cap = None\n"
+                    "  def handle_data(self, data):\n"
+                    "    if getattr(self,'cap',None) and data.strip():\n"
+                    "      self.links.append((self.cap, data.strip()))\n"
+                    "p = L()\n"
+                    "p.feed(sys.stdin.read())\n"
+                    "for h,t in p.links:\n"
+                    "  if h: print(f'{h}  ({t})' if t else h)\n";
+            } else {
+                py_script = "import html.parser, sys\n"
+                    "q = sys.argv[1] if len(sys.argv)>1 else ''\n"
+                    "class F(html.parser.HTMLParser):\n"
+                    "  def __init__(self):\n"
+                    "    super().__init__()\n"
+                    "    self.r = []\n"
+                    "    self.cap = False\n"
+                    "  def handle_starttag(self, tag, attrs):\n"
+                    "    self.cap = False\n"
+                    "    cls = set(); iid = ''\n"
+                    "    for n,v in attrs:\n"
+                    "      if n=='class' and v: cls = set(v.split())\n"
+                    "      if n=='id' and v: iid = v\n"
+                    "    if q.startswith('.'): self.cap = q[1:] in cls\n"
+                    "    elif q.startswith('#'): self.cap = q[1:] == iid\n"
+                    "    elif q == tag: self.cap = True\n"
+                    "    elif ' ' in q and q.split()[-1]==tag: self.cap = True\n"
+                    "  def handle_data(self, data):\n"
+                    "    if self.cap and data.strip(): self.r.append(data.strip())\n"
+                    "p = F()\n"
+                    "p.feed(sys.stdin.read())\n"
+                    "for x in p.r: print(x)\n";
+            }
+
+            std::string htmlfile = (fs::temp_directory_path() / "agent_html_in.html").string();
+            std::string pyfile = (fs::temp_directory_path() / "agent_html_parse.py").string();
+            {
+                std::ofstream pf(pyfile); pf << py_script;
+            }
+            {
+                std::ofstream hf(htmlfile); hf << html;
+            }
+
+            std::string cmd;
+            if (query == "text" || query == "links") {
+                cmd = std::format("python3 '{}' < '{}' 2>&1 || true", pyfile, htmlfile);
+            } else {
+                std::string eq; for (char c : query) { if (c == '\'') eq += "'\\''"; else eq.push_back(c); }
+                cmd = std::format("python3 '{}' '{}' < '{}' 2>&1 || true", pyfile, eq, htmlfile);
+            }
+
+            ShellResult r = run_shell(cmd, root, 30);
+            if (r.output.empty()) return "[no results found]";
+            return truncate(r.output, 100000);
+        }
+
+        // ── parse_xml ────────────────────────────────────────────────
+        if (name == "parse_xml") {
+            std::string xml = get_str("xml");
+            std::string xpath = get_str("xpath");
+            if (xml.empty()) return "[tool error: 'xml' required]";
+            if (xpath.empty()) xpath = "text";
+
+            std::string py_script;
+            if (xpath == "text") {
+                py_script = "import sys, xml.etree.ElementTree as ET\n"
+                    "t = ET.parse(sys.stdin)\n"
+                    "def gt(e):\n"
+                    "  r = [e.text] if e.text and e.text.strip() else []\n"
+                    "  for c in e:\n"
+                    "    r.extend(gt(c))\n"
+                    "    if c.tail and c.tail.strip(): r.append(c.tail.strip())\n"
+                    "  return r\n"
+                    "for x in gt(t.getroot()): print(x)\n";
+            } else if (xpath == "structure") {
+                py_script = "import sys, xml.etree.ElementTree as ET\n"
+                    "t = ET.parse(sys.stdin)\n"
+                    "def sh(e, i=0):\n"
+                    "  p = '  '*i\n"
+                    "  a = ' '.join(f'{k}=\"{v}\"' for k,v in e.attrib.items())\n"
+                    "  s = e.tag + (f' [{a}]' if a else '')\n"
+                    "  tx = (e.text or '').strip()\n"
+                    "  if tx: s += f' = \"{tx[:50]}\"'\n"
+                    "  print(f'{p}<{s}>')\n"
+                    "  for c in e: sh(c, i+1)\n"
+                    "sh(t.getroot())\n";
+            } else {
+                py_script = "import sys, xml.etree.ElementTree as ET\n"
+                    "xp = sys.argv[1] if len(sys.argv)>1 else ''\n"
+                    "t = ET.parse(sys.stdin)\n"
+                    "try:\n"
+                    "  for e in t.getroot().findall(xp):\n"
+                    "    tx = (e.text or '').strip()\n"
+                    "    if tx: print(tx)\n"
+                    "    else:\n"
+                    "      a = ' '.join(f'{k}=\"{v}\"' for k,v in e.attrib.items())\n"
+                    "      print(f'<{e.tag}>' + (f' [{a}]' if a else ''))\n"
+                    "except Exception as ex: print(f'[error: {ex}]')\n";
+            }
+
+            std::string xmlfile = (fs::temp_directory_path() / "agent_xml_in.xml").string();
+            std::string pyfile = (fs::temp_directory_path() / "agent_xml_parse.py").string();
+            {
+                std::ofstream pf(pyfile); pf << py_script;
+            }
+            {
+                std::ofstream xf(xmlfile); xf << xml;
+            }
+
+            std::string cmd;
+            if (xpath == "text" || xpath == "structure") {
+                cmd = std::format("python3 '{}' < '{}' 2>&1 || true", pyfile, xmlfile);
+            } else {
+                std::string ex; for (char c : xpath) { if (c == '\'') ex += "'\\''"; else ex.push_back(c); }
+                cmd = std::format("python3 '{}' '{}' < '{}' 2>&1 || true", pyfile, ex, xmlfile);
+            }
+
+            ShellResult r = run_shell(cmd, root, 30);
+            if (r.output.empty()) return "[no results found]";
+            return truncate(r.output, 100000);
+        }
+
+        // ── parse_json ───────────────────────────────────────────────
+        if (name == "parse_json") {
+            std::string json_str = get_str("json");
+            std::string query = get_str("query");
+            if (json_str.empty()) return "[tool error: 'json' required]";
+
+            std::string py_script = "import sys, json\n"
+                "def qj(obj, path):\n"
+                "  if not path: return obj\n"
+                "  for p in path.split('.'):\n"
+                "    if '[' in p and p.endswith(']'):\n"
+                "      n, i = p[:-1].split('[')\n"
+                "      idx = int(i)\n"
+                "      if isinstance(obj,dict) and n in obj: obj = obj[n]\n"
+                "      if isinstance(obj,list) and idx < len(obj): obj = obj[idx]\n"
+                "      else: return None\n"
+                "    else:\n"
+                "      if isinstance(obj,dict) and p in obj: obj = obj[p]\n"
+                "      else: return None\n"
+                "  return obj\n"
+                "d = json.load(sys.stdin)\n"
+                "p = sys.argv[1] if len(sys.argv)>1 else ''\n"
+                "if p:\n"
+                "  r = qj(d,p)\n"
+                "  if r is None: print(f'[not found: {p}]')\n"
+                "  else: print(json.dumps(r, indent=2, ensure_ascii=False))\n"
+                "else: print(json.dumps(d, indent=2, ensure_ascii=False))\n";
+
+            std::string jsonfile = (fs::temp_directory_path() / "agent_json_in.json").string();
+            std::string pyfile = (fs::temp_directory_path() / "agent_json_parse.py").string();
+            {
+                std::ofstream pf(pyfile); pf << py_script;
+            }
+            {
+                std::ofstream jf(jsonfile); jf << json_str;
+            }
+
+            std::string cmd;
+            if (query.empty()) {
+                cmd = std::format("python3 '{}' '' < '{}' 2>&1 || true", pyfile, jsonfile);
+            } else {
+                std::string eq; for (char c : query) { if (c == '\'') eq += "'\\''"; else eq.push_back(c); }
+                cmd = std::format("python3 '{}' '{}' < '{}' 2>&1 || true", pyfile, eq, jsonfile);
+            }
+
+            ShellResult r = run_shell(cmd, root, 30);
+            if (r.output.empty()) return "[empty result]";
+            return truncate(r.output, 100000);
+        }
+
+        // ── render_mermaid ────────────────────────────────────────────
+        if (name == "render_mermaid") {
+            std::string mermaid = get_str("mermaid");
+            std::string output = get_str("output");
+            if (mermaid.empty()) return "[tool error: 'mermaid' required]";
+            if (output.empty()) return "[tool error: 'output' required]";
+
+            fs::path output_path = resolve_under_root(root, output);
+            fs::create_directories(output_path.parent_path());
+
+            std::string check_cmd = "which mmdc 2>/dev/null || true";
+            ShellResult check_r = run_shell(check_cmd, root, 5);
+            bool has_mmdc = !check_r.output.empty() && check_r.output.find("mmdc") != std::string::npos;
+
+            if (has_mmdc) {
+                std::string mmdfile = (fs::temp_directory_path() / "agent_diagram.mmd").string();
+                { std::ofstream mf(mmdfile); mf << mermaid; }
+                std::string cmd = std::format("mmdc -i '{}' -o '{}' -w 1200 -H 800 2>&1 || true", mmdfile, output_path.string());
+                ShellResult r2 = run_shell(cmd, root, 60);
+                if (r2.exit_code == 0 && fs::exists(output_path)) {
+                    auto sz = fs::file_size(output_path);
+                    return std::format("[ok: generated SVG '{}' ({} bytes)]\n{}", output, sz, r2.output);
+                }
+                return std::format("[error: mmdc failed]\n{}", r2.output);
+            }
+
+            // Fallback: SVG with mermaid source as text
+            std::string svg = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 800 600\" width=\"800\" height=\"600\">\n"
+                "  <rect width=\"100%\" height=\"100%\" fill=\"#f8f9fa\"/>\n"
+                "  <text x=\"400\" y=\"50\" text-anchor=\"middle\" font-family=\"monospace\" font-size=\"20\" fill=\"#333\">Mermaid Diagram</text>\n"
+                "  <text x=\"400\" y=\"80\" text-anchor=\"middle\" font-family=\"monospace\" font-size=\"14\" fill=\"#666\">Install mmdc for proper SVG rendering</text>\n";
+            int y = 120;
+            svg += std::format("  <text x=\"20\" y=\"{}\" font-family=\"monospace\" font-size=\"12\" fill=\"#333\">Mermaid source:</text>\n", y);
+            y += 25;
+            std::istringstream ms(mermaid);
+            std::string line;
+            while (std::getline(ms, line)) {
+                std::string esc;
+                for (char c : line) {
+                    if (c == '&') esc += "&amp;";
+                    else if (c == '<') esc += "&lt;";
+                    else if (c == '>') esc += "&gt;";
+                    else if (c == '"') esc += "&quot;";
+                    else if (c == '\'') esc += "&apos;";
+                    else esc.push_back(c);
+                }
+                svg += std::format("  <text x=\"30\" y=\"{}\" font-family=\"monospace\" font-size=\"11\" fill=\"#555\">{}</text>\n", y, esc);
+                y += 18;
+            }
+            svg += "</svg>\n";
+
+            { std::ofstream of(output_path); of << svg; }
+            return std::format("[ok: generated text-based SVG '{}' ({} bytes). Install mmdc for proper rendering.]\n"
+                               "To install: npm install -g @mermaid-js/mermaid-cli",
+                               output, svg.size());
+        }
+
+        // ── image_info ───────────────────────────────────────────────
+        if (name == "image_info") {
+            std::string path = get_str("path");
+            if (path.empty()) return "[tool error: 'path' required]";
+            fs::path resolved = resolve_under_root(root, path);
+            std::error_code ec;
+            if (!fs::exists(resolved, ec)) return std::format("[error: file not found: {}]", resolved.string());
+
+            std::string py_script = "import sys, json\n"
+                "from PIL import Image\n"
+                "img = Image.open(sys.argv[1])\n"
+                "info = {'format': img.format or 'unknown', 'mode': img.mode, 'width': img.width, 'height': img.height}\n"
+                "print(json.dumps(info, indent=2))\n";
+
+            std::string pyfile = (fs::temp_directory_path() / "agent_img_info.py").string();
+            { std::ofstream pf(pyfile); pf << py_script; }
+
+            std::string cmd = std::format("python3 '{}' '{}' 2>&1 || true", pyfile, resolved.string());
+            ShellResult r = run_shell(cmd, root, 30);
+            if (r.exit_code != 0 || r.output.empty()) {
+                return std::format("[error: could not read image '{}']\n{}", path, r.output);
+            }
+            return r.output;
+        }
+
+        // ── image_convert ────────────────────────────────────────────
+        if (name == "image_convert") {
+            std::string src = get_str("source");
+            std::string dst = get_str("destination");
+            int width = get_int("width", 0);
+            int height = get_int("height", 0);
+            int quality = std::clamp(get_int("quality", 85), 1, 100);
+            if (src.empty() || dst.empty()) return "[tool error: 'source' and 'destination' required]";
+
+            fs::path src_resolved = resolve_under_root(root, src);
+            fs::path dst_resolved = resolve_under_root(root, dst);
+            std::error_code ec;
+            if (!fs::exists(src_resolved, ec)) return std::format("[error: source not found: {}]", src);
+            fs::create_directories(dst_resolved.parent_path(), ec);
+
+            std::string py_script = "import sys\n"
+                "from PIL import Image\n"
+                "src = sys.argv[1]; dst = sys.argv[2]\n"
+                "img = Image.open(src)\n"
+                "w = int(sys.argv[3]) if len(sys.argv)>3 and sys.argv[3] else 0\n"
+                "h = int(sys.argv[4]) if len(sys.argv)>4 and sys.argv[4] else 0\n"
+                "q = int(sys.argv[5]) if len(sys.argv)>5 and sys.argv[5] else 85\n"
+                "if w or h:\n"
+                "  if w and h: img = img.resize((w,h), Image.LANCZOS)\n"
+                "  elif w: r = w/img.width; img = img.resize((w, int(img.height*r)), Image.LANCZOS)\n"
+                "  elif h: r = h/img.height; img = img.resize((int(img.width*r), h), Image.LANCZOS)\n"
+                "ext = dst.lower()\n"
+                "kw = {}\n"
+                "if ext.endswith('.jpg') or ext.endswith('.jpeg'):\n"
+                "  kw['quality'] = q\n"
+                "  if img.mode in ('RGBA','P'): img = img.convert('RGB')\n"
+                "elif ext.endswith('.webp'): kw['quality'] = q\n"
+                "elif ext.endswith('.png'): kw['compress_level'] = 6\n"
+                "img.save(dst, **kw)\n"
+                "print(f'OK: {img.width}x{img.height} -> {dst}')\n";
+
+            std::string pyfile = (fs::temp_directory_path() / "agent_img_convert.py").string();
+            { std::ofstream pf(pyfile); pf << py_script; }
+
+            std::string cmd = std::format("python3 '{}' '{}' '{}' {} {} {} 2>&1 || true",
+                                          pyfile, src_resolved.string(), dst_resolved.string(),
+                                          width, height, quality);
+            ShellResult r = run_shell(cmd, root, 60);
+            if (r.exit_code != 0 || r.output.find("OK:") == std::string::npos) {
+                return std::format("[error: conversion failed]\n{}", r.output);
+            }
+            auto out_size = fs::file_size(dst_resolved, ec);
+            return std::format("[ok: converted '{}' -> '{}' ({} bytes)]\n{}", src, dst, out_size, r.output);
+        }
+
+        // ── image_to_svg ─────────────────────────────────────────────
+        if (name == "image_to_svg") {
+            std::string src = get_str("source");
+            std::string dst = get_str("destination");
+            if (src.empty() || dst.empty()) return "[tool error: 'source' and 'destination' required]";
+
+            fs::path src_resolved = resolve_under_root(root, src);
+            fs::path dst_resolved = resolve_under_root(root, dst);
+            std::error_code ec;
+            if (!fs::exists(src_resolved, ec)) return std::format("[error: source not found: {}]", src);
+            fs::create_directories(dst_resolved.parent_path(), ec);
+
+            std::string py_script = "import sys, base64, io\n"
+                "from PIL import Image\n"
+                "src = sys.argv[1]; dst = sys.argv[2]\n"
+                "img = Image.open(src)\n"
+                "fmt = img.format or 'PNG'\n"
+                "mm = {'PNG':'image/png','JPEG':'image/jpeg','GIF':'image/gif','BMP':'image/bmp','WEBP':'image/webp'}\n"
+                "mime = mm.get(fmt, 'image/png')\n"
+                "buf = io.BytesIO()\n"
+                "img.save(buf, format=fmt)\n"
+                "b64 = base64.b64encode(buf.getvalue()).decode('ascii')\n"
+                "svg = '<?xml version=\"1.0\" encoding=\"UTF-8\"?>\\n' \\\n"
+                "  '<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {} {}\" width=\"{}\" height=\"{}\">\\n' \\\n"
+                "  '<image width=\"{}\" height=\"{}\" href=\"data:{};base64,{}\"/>\\n</svg>\\n' \\\n"
+                "  .format(img.width, img.height, img.width, img.height, img.width, img.height, mime, b64)\n"
+                "with open(dst, 'w') as f: f.write(svg)\n"
+                "print(f'OK: {img.width}x{img.height} {fmt} -> SVG ({len(svg)} bytes)')\n";
+
+            std::string pyfile = (fs::temp_directory_path() / "agent_img2svg.py").string();
+            { std::ofstream pf(pyfile); pf << py_script; }
+
+            std::string cmd = std::format("python3 '{}' '{}' '{}' 2>&1 || true",
+                                          pyfile, src_resolved.string(), dst_resolved.string());
+            ShellResult r = run_shell(cmd, root, 60);
+            if (r.exit_code != 0 || r.output.find("OK:") == std::string::npos) {
+                return std::format("[error: conversion failed]\n{}", r.output);
+            }
+            auto out_size = fs::file_size(dst_resolved, ec);
+            return std::format("[ok: '{}' -> '{}' ({} bytes)]\n{}", src, dst, out_size, r.output);
         }
 
         return std::format("[tool error: unknown tool '{}']", name);
