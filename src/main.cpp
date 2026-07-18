@@ -121,7 +121,7 @@ REPL COMMANDS
 FLOW CONTROL
   Ctrl+S      pause output (terminal flow control)
   Ctrl+Q      resume output
-  Ctrl+C      during AI response: cancel and return to prompt
+  Ctrl+C      during AI response: cancel, preserve context, return to prompt
               at prompt: exit the program
 )";
 
@@ -605,7 +605,7 @@ int main(int argc, char** argv) {
     } else {
         std::cout << "Note: Ctrl+S/Ctrl+Q flow control unavailable (not a terminal or IXON disabled)\n";
     }
-    std::cout << "Interrupt: Ctrl+C during AI response to cancel, at prompt to exit\n";
+    std::cout << "Interrupt: Ctrl+C during AI response to cancel (context preserved), at prompt to exit\n";
     std::cout << '\n';
 
     std::string prompt;
@@ -771,20 +771,27 @@ int main(int argc, char** argv) {
         }
 
         // If the turn was interrupted by Ctrl+C, do NOT auto-commit
-        // (the agent's changes may be partial/incomplete).  Also
-        // remove the user's prompt message so the conversation stays
-        // clean.
+        // (the agent's changes may be partial/incomplete).  However,
+        // PRESERVE the user's prompt and all prior conversation context
+        // so the user can continue from where they left off.  Only
+        // remove any partial assistant/tool messages that may have been
+        // added before the interrupt (they are incomplete).
         if (turn_interrupted) {
             set_color("33");
-            std::cout << "[cancelled]\n";
+            std::cout << "[cancelled - context preserved, you can continue]\n";
             reset_color();
-            if (!messages.empty() && messages.back().role == "user") {
-                messages.pop_back();
-            }
-            // Also remove any partial assistant/tool messages that may
-            // have been added before the interrupt.
+            // Remove any partial assistant/tool messages that may
+            // have been added before the interrupt, but KEEP the
+            // user's prompt so the conversation context is preserved.
             while (!messages.empty() && messages.back().role != "user" && messages.back().role != "system") {
                 messages.pop_back();
+            }
+            // Save a snapshot so the user can roll back if needed.
+            std::string commit_hash = auto_commit(cfg.root, snap_label(prompt), dirty_before);
+            if (!commit_hash.empty()) {
+                history.save(messages, snap_label(prompt) + " (interrupted)", commit_hash);
+            } else {
+                history.save(messages, snap_label(prompt) + " (interrupted)");
             }
             continue;
         }
