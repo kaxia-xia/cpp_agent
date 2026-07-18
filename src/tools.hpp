@@ -674,27 +674,7 @@ inline json::Value tool_schemas() {
             std::move(p)));
     }
 
-    // ── 26. speak - text-to-speech ───────────────────────────────────
-    {
-        json::Object p;
-        p["type"] = json::Value{"object"};
-        json::Object props;
-        json::Object text_p; text_p["type"] = json::Value{"string"};
-        text_p["description"] = json::Value{"Text to speak aloud."};
-        props["text"] = json::Value{std::move(text_p)};
-        json::Object lang_p; lang_p["type"] = json::Value{"string"};
-        lang_p["description"] = json::Value{"Language (e.g. 'zh', 'en'). Default: 'en'."};
-        lang_p["default"] = json::Value{"en"};
-        props["lang"] = json::Value{std::move(lang_p)};
-        p["properties"] = json::Value{std::move(props)};
-        p["required"] = json::make_array<std::string>({"text"});
-        tools.push_back(fn("speak",
-            "Convert text to speech and play it aloud on the device. "
-            "Uses termux-tts-speak. The agent can literally 'talk' to you!",
-            std::move(p)));
-    }
-
-    // ── 27. vibrate - haptic feedback ────────────────────────────────
+    // ── 26. vibrate - haptic feedback ────────────────────────────────
     {
         json::Object p;
         p["type"] = json::Value{"object"};
@@ -1832,26 +1812,6 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             ShellResult r = run_shell(cmd, root, 10);
             if (r.exit_code == 0) return std::format("[ok: notification sent: '{}']", title);
             return std::format("[error: notification failed]\n{}", r.output);
-        }
-
-        // ── speak ────────────────────────────────────────────────────
-        if (name == "speak") {
-            std::string text = get_str("text");
-            std::string lang = get_str("lang");
-            if (text.empty()) return "[tool error: 'text' required]";
-            if (lang.empty()) lang = "en";
-
-            std::string escaped;
-            for (char c : text) {
-                if (c == '\'') escaped += "'\\''";
-                else escaped.push_back(c);
-            }
-            // termux-tts-speak uses -l (not --lang), and text must be piped via stdin
-            // to avoid argument parsing issues with spaces/special chars
-            std::string cmd = std::format("echo '{}' | termux-tts-speak -l '{}' 2>&1 || true", escaped, lang);
-            ShellResult r = run_shell(cmd, root, 30);
-            if (r.exit_code == 0) return std::format("[ok: speaking {} chars in '{}']", text.size(), lang);
-            return std::format("[error: TTS failed]\n{}", r.output);
         }
 
         // ── vibrate ──────────────────────────────────────────────────

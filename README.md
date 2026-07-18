@@ -52,7 +52,6 @@ Agent 模型可通过 Function Calling 机制调用以下 **38 个工具**，自
 | `image_to_svg` | 将位图嵌入为 base64 SVG（或使用 potrace 矢量化） |
 | `clipboard` | 读取/写入 Android 系统剪贴板 |
 | `notify` | 发送 Android 通知到通知栏 |
-| `speak` | 文字转语音（TTS），让手机开口说话 |
 | `vibrate` | 手机震动反馈 |
 | `run_python` | 执行 Python 代码片段并返回结果 |
 | `ocr` | 图片文字识别（OCR），基于 Tesseract 引擎 |
@@ -77,7 +76,6 @@ Agent 模型可通过 Function Calling 机制调用以下 **38 个工具**，自
 |------|------|------|
 | `clipboard` | `termux-clipboard-get/set` | 读写系统剪贴板，Agent 可直接把代码放剪贴板 |
 | `notify` | `termux-notification` | 发送通知到通知栏，长时间任务完成时提醒 |
-| `speak` | `termux-tts-speak` | 文字转语音，Agent 能"开口说话" |
 | `vibrate` | `termux-vibrate` | 震动反馈，出错或完成时震动提醒 |
 | `screenshot` | `termux-screencap` | 截取屏幕，结合 `ocr` 可分析屏幕内容 |
 | `system_info` | `termux-battery-status` | 获取电池/CPU/内存/存储/网络信息 |
@@ -143,7 +141,6 @@ print(f"计算结果: {result}")
 ```
 screenshot → ocr → "屏幕上显示编译错误：..."
                 → notify "发现编译错误！"
-                → speak "主人，代码出问题了，我来修复"
                 → vibrate (震动提醒你)
 ```
 
