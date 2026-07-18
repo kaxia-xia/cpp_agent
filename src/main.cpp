@@ -299,6 +299,7 @@ std::string build_system_prompt(const fs::path& root) {
         "  - get_datetime(format?): get current date and time in specified format.\n"
         "  - screenshot(output?): capture device screen.\n"
         "  - plot_chart(chart_type, data_json, title?, output?): generate chart image.\n"
+        "  - show_image(path, method?, ascii_width?): display an image file in Termux (system viewer or ASCII art).\n"
         "  - finish(summary): return the final answer and end the task. Call exactly once when done.\n\n"
         "GUIDELINES\n"
         "  1. Use tools whenever possible: always prefer calling agent tools (read_file, write_file, run_command, etc.) over just describing what you would do. The tools are your primary way to interact with the environment.\n"

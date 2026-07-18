@@ -956,6 +956,36 @@ inline json::Value tool_schemas() {
             std::move(p)));
     }
 
+    // ── 39. show_image - display an image file in Termux ──────────────
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object path_p; path_p["type"] = json::Value{"string"};
+        path_p["description"] = json::Value{"Path to the image file to display (PNG, JPEG, SVG, etc.)."};
+        props["path"] = json::Value{std::move(path_p)};
+        json::Object method_p; method_p["type"] = json::Value{"string"};
+        method_p["description"] = json::Value{"Display method: 'auto' (try best available), 'termux-open' (open with system viewer), 'ascii' (render as ASCII art in terminal). Default: 'auto'."};
+        method_p["default"] = json::Value{"auto"};
+        method_p["enum"] = json::make_array<std::string>({"auto", "termux-open", "ascii"});
+        props["method"] = json::Value{std::move(method_p)};
+        json::Object width_p; width_p["type"] = json::Value{"integer"};
+        width_p["description"] = json::Value{"ASCII render width in characters (default: terminal width, min 20, max 200). Only used when method='ascii'."};
+        width_p["default"] = json::Value{0};
+        props["ascii_width"] = json::Value{std::move(width_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"path"});
+        tools.push_back(fn("show_image",
+            "Display an image file (PNG, JPEG, SVG, etc.) in the Termux terminal. "
+            "Three methods available: "
+            "'termux-open' opens the image with the system image viewer (best for photos); "
+            "'ascii' renders the image as ASCII art directly in the terminal (no external viewer needed); "
+            "'auto' tries 'termux-open' first, falls back to 'ascii' if unavailable. "
+            "For SVG files, converts to PNG first before displaying. "
+            "Useful for viewing screenshots, charts, diagrams, or any image file.",
+            std::move(p)));
+    }
+
     return json::Value{std::move(tools)};
 }
 
@@ -2421,6 +2451,147 @@ print(f'OK: chart saved to {output}')
                 return std::format("[ok: {} chart generated -> '{}' ({} bytes)]\n{}", chart_type, output, sz, r.output);
             }
             return std::format("[error: chart generation failed]\n{}", r.output);
+        }
+
+        // ── show_image - display an image file in Termux ──────────────
+        if (name == "show_image") {
+            std::string path = get_str("path");
+            std::string method = get_str("method");
+            int ascii_width = std::clamp(get_int("ascii_width", 0), 0, 200);
+            if (path.empty()) return "[tool error: 'path' required]";
+            if (method.empty()) method = "auto";
+
+            fs::path resolved = resolve_under_root(root, path);
+            std::error_code ec;
+            if (!fs::exists(resolved, ec)) return std::format("[error: file not found: {}]", resolved.string());
+
+            // Check if it's an SVG file - convert to PNG first
+            fs::path display_path = resolved;
+            std::string ext = resolved.extension().string();
+            bool is_svg = (ext == ".svg" || ext == ".SVG");
+
+            if (is_svg) {
+                // Convert SVG to PNG using Python's cairosvg or rsvg-convert
+                std::string png_path = (fs::temp_directory_path() / "agent_svg_temp.png").string();
+                std::string escaped_src, escaped_dst;
+                for (char c : resolved.string()) { if (c == '\'') escaped_src += "'\\''"; else escaped_src.push_back(c); }
+                for (char c : png_path) { if (c == '\'') escaped_dst += "'\\''"; else escaped_dst.push_back(c); }
+
+                // Try rsvg-convert first, then cairosvg, then fallback
+                // Try rsvg-convert first, then ImageMagick convert, as fallback
+                std::string svg_cmd = std::format("rsvg-convert '{}' -o '{}' 2>/dev/null || convert '{}' '{}' 2>/dev/null || true",
+                                                  escaped_src, escaped_dst, escaped_src, escaped_dst);
+                ShellResult svg_r = run_shell(svg_cmd, root, 30);
+                if (fs::exists(png_path, ec) && fs::file_size(png_path, ec) > 0) {
+                    display_path = png_path;
+                } else {
+                    return std::format("[error: cannot convert SVG '{}' to PNG. Install rsvg-convert: pkg install librsvg]", path);
+                }
+            }
+
+            // Determine method
+            if (method == "auto") {
+                // Check if termux-open is available
+                std::string check_cmd = "command -v termux-open 2>/dev/null || true";
+                ShellResult check_r = run_shell(check_cmd, root, 5);
+                if (!check_r.output.empty() && check_r.output.find("termux-open") != std::string::npos) {
+                    method = "termux-open";
+                } else {
+                    method = "ascii";
+                }
+            }
+
+            if (method == "termux-open") {
+                std::string escaped;
+                for (char c : display_path.string()) { if (c == '\'') escaped += "'\\''"; else escaped.push_back(c); }
+                std::string cmd = std::format("termux-open '{}' 2>&1 || true", escaped);
+                ShellResult r = run_shell(cmd, root, 10);
+                if (r.exit_code == 0) {
+                    std::ostringstream ss;
+                    ss << std::format("[ok: opened '{}' with system image viewer]", path);
+                    if (is_svg) ss << std::format(" (converted from SVG)");
+                    return ss.str();
+                }
+                // Fallback to ascii if termux-open fails
+                method = "ascii";
+            }
+
+            if (method == "ascii") {
+                // Use Python PIL to render image as ASCII art
+                if (ascii_width == 0) {
+                    // Try to get terminal width
+                    ShellResult tw_r = run_shell("tput cols 2>/dev/null || echo 80", root, 5);
+                    try { ascii_width = std::stoi(tw_r.output); } catch (...) { ascii_width = 80; }
+                    ascii_width = std::clamp(ascii_width, 40, 200);
+                }
+
+                std::string py_script = R"PY(
+import sys, os
+os.environ['MPLBACKEND'] = 'Agg'
+from PIL import Image
+
+img_path = sys.argv[1]
+width = int(sys.argv[2]) if len(sys.argv) > 2 else 80
+
+# ASCII characters from dark to light
+chars = ' .:-=+*#%@'
+# chars = ' .\'`^",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$'
+
+try:
+    img = Image.open(img_path)
+    
+    # Convert to grayscale
+    if img.mode == 'RGBA':
+        # Handle transparency: composite on white background
+        bg = Image.new('RGB', img.size, (255, 255, 255))
+        bg.paste(img, mask=img.split()[3])
+        img = bg
+    img = img.convert('L')
+    
+    # Calculate height to preserve aspect ratio (characters are ~2x tall as wide)
+    aspect = img.height / img.width
+    height = max(1, int(width * aspect * 0.45))
+    
+    img = img.resize((width, height), Image.LANCZOS)
+    pixels = list(img.getdata())
+    
+    result = []
+    for y in range(height):
+        row = ''
+        for x in range(width):
+            pixel = pixels[y * width + x]
+            # Map pixel value (0-255) to character index
+            idx = pixel * (len(chars) - 1) // 255
+            row += chars[idx]
+        result.append(row)
+    
+    print(f'ASCII art ({width}x{height}):')
+    print('\n'.join(result))
+    print(f'\n[Image: {img_path}, size={width}x{height}]')
+except Exception as e:
+    print(f'[error: {e}]', file=sys.stderr)
+    sys.exit(1)
+)PY";
+
+                std::string pyfile = (fs::temp_directory_path() / "agent_show_image.py").string();
+                { std::ofstream pf(pyfile); pf << py_script; }
+
+                std::string escaped_path;
+                for (char c : display_path.string()) { if (c == '\'') escaped_path += "'\\''"; else escaped_path.push_back(c); }
+
+                std::string cmd = std::format("python3 '{}' '{}' {} 2>&1 || true", pyfile, escaped_path, ascii_width);
+                ShellResult r = run_shell(cmd, root, 30);
+
+                if (r.exit_code == 0 && !r.output.empty()) {
+                    std::ostringstream ss;
+                    ss << r.output;
+                    if (is_svg) ss << "\n[converted from SVG]";
+                    return ss.str();
+                }
+                return std::format("[error: ASCII render failed]\n{}", r.output);
+            }
+
+            return std::format("[tool error: unknown method '{}'. Use 'auto', 'termux-open', or 'ascii']", method);
         }
 
         return std::format("[tool error: unknown tool '{}']", name);
