@@ -310,7 +310,9 @@ std::string build_system_prompt(const fs::path& root) {
         "  6. Paths are sandboxed to the workspace root; relative paths are preferred.\n"
         "  7. When the task is complete, call finish with a short summary of what you did.\n"
         "  8. If a tool errors, read the message and adapt — do not repeat the identical call.\n"
-        "  9. Never invent file contents; read first when you need accuracy.\n",
+        "  9. Never invent file contents; read first when you need accuracy.\n"
+        "  10. 每轮对话结束后（即调用 finish 之前），都必须调用 notify 工具向通知栏发送一条通知，"
+        "告知用户本轮任务已完成。标题用 \"coding-agent\"，内容简要描述本轮完成的工作。\n",
         fs::weakly_canonical(root).string());
 }
 
