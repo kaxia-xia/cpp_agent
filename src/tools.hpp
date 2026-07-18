@@ -873,6 +873,44 @@ inline json::Value tool_schemas() {
             std::move(p)));
     }
 
+    // ── 37. get_location - get current geographic location ────────────
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object prov_p; prov_p["type"] = json::Value{"string"};
+        prov_p["description"] = json::Value{"Provider: 'network' (fast, coarse), 'gps' (slow, precise). Default: 'network'."};
+        prov_p["default"] = json::Value{"network"};
+        props["provider"] = json::Value{std::move(prov_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({});
+        tools.push_back(fn("get_location",
+            "Get the current geographic location (latitude, longitude) of the device. "
+            "Uses termux-location. Provider 'network' returns quickly with ~30m accuracy; "
+            "'gps' takes longer but is more precise. Returns latitude, longitude, accuracy, and provider info.",
+            std::move(p)));
+    }
+
+    // ── 38. get_datetime - get current date and time ──────────────────
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object fmt_p; fmt_p["type"] = json::Value{"string"};
+        fmt_p["description"] = json::Value{"Format string (strftime format, e.g. '%Y-%m-%d %H:%M:%S', '%A', '%Y-%m-%d'). Default: '%Y-%m-%d %H:%M:%S %Z'."};
+        fmt_p["default"] = json::Value{"%Y-%m-%d %H:%M:%S %Z"};
+        props["format"] = json::Value{std::move(fmt_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({});
+        tools.push_back(fn("get_datetime",
+            "Get the current date and time on the device. "
+            "Returns the current system date/time in the specified format. "
+            "Uses strftime formatting: %Y=year, %m=month, %d=day, %H=hour, %M=minute, %S=second, "
+            "%A=weekday name, %B=month name, %Z=timezone. "
+            "Default format: '%Y-%m-%d %H:%M:%S %Z'.",
+            std::move(p)));
+    }
+
     // ── 37. screenshot - capture device screen ───────────────────────
     {
         json::Object p;
@@ -2184,6 +2222,95 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             return truncate(ss.str(), 5000);
         }
 
+        // ── get_location - get current geographic location ────────────
+        if (name == "get_location") {
+            std::string provider = get_str("provider");
+            if (provider.empty()) provider = "network";
+
+            if (provider != "network" && provider != "gps") {
+                return std::format("[tool error: invalid provider '{}'. Use 'network' or 'gps']", provider);
+            }
+
+            std::string cmd = std::format("termux-location -p {} 2>&1 || true", provider);
+            ShellResult r = run_shell(cmd, root, provider == "gps" ? 60 : 15);
+
+            if (r.exit_code != 0 || r.output.empty()) {
+                return std::format("[error: could not get location. Is termux-api installed? Try: pkg install termux-api]\n{}", r.output);
+            }
+
+            // Parse and pretty-print the JSON result
+            std::string py_script = R"PY(
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    lat = data.get('latitude', '?')
+    lon = data.get('longitude', '?')
+    acc = data.get('accuracy', '?')
+    prov = data.get('provider', '?')
+    alt = data.get('altitude', '?')
+    print(f"Latitude:  {lat}")
+    print(f"Longitude: {lon}")
+    print(f"Accuracy:  {acc}m")
+    print(f"Provider:  {prov}")
+    if alt: print(f"Altitude:  {alt}m")
+except Exception as e:
+    print(f"[parse error: {e}]")
+    print(sys.stdin.read())
+)PY";
+
+            std::string pyfile = (fs::temp_directory_path() / "agent_location.py").string();
+            { std::ofstream pf(pyfile); pf << py_script; }
+
+            std::string jsonfile = (fs::temp_directory_path() / "agent_location_in.json").string();
+            { std::ofstream jf(jsonfile); jf << r.output; }
+            cmd = std::format("python3 '{}' < '{}' 2>&1 || true", pyfile, jsonfile);
+            ShellResult r2 = run_shell(cmd, root, 10);
+
+            if (!r2.output.empty()) return r2.output;
+            return r.output;
+        }
+
+        // ── get_datetime - get current date and time ──────────────────
+        if (name == "get_datetime") {
+            std::string format = get_str("format");
+            if (format.empty()) format = "%Y-%m-%d %H:%M:%S %Z";
+
+            // Escape single quotes for shell
+            std::string escaped_fmt;
+            for (char c : format) {
+                if (c == '\'') escaped_fmt += "'\\''";
+                else escaped_fmt.push_back(c);
+            }
+
+            std::string cmd = std::format("date '+{}' 2>&1 || true", escaped_fmt);
+            ShellResult r = run_shell(cmd, root, 5);
+
+            if (r.exit_code != 0 || r.output.empty()) {
+                return std::format("[error: could not get date/time]\n{}", r.output);
+            }
+
+            // Also get timezone and timestamp info
+            std::string cmd_tz = "date '+%Z' 2>/dev/null || true";
+            ShellResult r_tz = run_shell(cmd_tz, root, 5);
+
+            std::string cmd_epoch = "date '+%s' 2>/dev/null || true";
+            ShellResult r_epoch = run_shell(cmd_epoch, root, 5);
+
+            std::ostringstream ss;
+            ss << r.output;
+            if (!ss.str().empty() && ss.str().back() != '\n') ss << '\n';
+            if (!r_tz.output.empty()) {
+                std::string tz = r_tz.output;
+                while (!tz.empty() && (tz.back() == '\n' || tz.back() == '\r')) tz.pop_back();
+                ss << std::format("Timezone: {}\n", tz);
+            }
+            if (!r_epoch.output.empty()) {
+                std::string ep = r_epoch.output;
+                while (!ep.empty() && (ep.back() == '\n' || ep.back() == '\r')) ep.pop_back();
+                ss << std::format("Unix timestamp: {}\n", ep);
+            }
+            return ss.str();
+        }
         // ── screenshot ───────────────────────────────────────────────
         if (name == "screenshot") {
             std::string output = get_str("output");

@@ -295,6 +295,8 @@ std::string build_system_prompt(const fs::path& root) {
         "  - decompress(archive, output_dir?): extract archive.\n"
         "  - system_info(category?): get device info (battery/cpu/memory/storage/network).\n"
         "  - weather(location?): query weather forecast.\n"
+        "  - get_location(provider?): get current geographic location (lat/lon) via GPS or network.\n"
+        "  - get_datetime(format?): get current date and time in specified format.\n"
         "  - screenshot(output?): capture device screen.\n"
         "  - plot_chart(chart_type, data_json, title?, output?): generate chart image.\n"
         "  - finish(summary): return the final answer and end the task. Call exactly once when done.\n\n"

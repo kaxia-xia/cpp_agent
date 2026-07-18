@@ -24,7 +24,7 @@
 
 ### 🛠️ Agent 工具集（模型可调用的工具）
 
-Agent 模型可通过 Function Calling 机制调用以下 **38 个工具**，自主完成代码编写、文件操作、网络请求、数据解析等任务：
+Agent 模型可通过 Function Calling 机制调用以下 **40 个工具**，自主完成代码编写、文件操作、网络请求、数据解析等任务：
 
 | 工具 | 作用 |
 |------|------|
@@ -62,6 +62,8 @@ Agent 模型可通过 Function Calling 机制调用以下 **38 个工具**，自
 | `decompress` | 解压归档文件（zip/tar.gz/tar.bz2/tar.xz） |
 | `system_info` | 获取 Android 设备信息（电池/CPU/内存/存储/网络） |
 | `weather` | 查询天气和预报（基于 wttr.in） |
+| `get_location` | 获取当前地理位置（经纬度），基于 termux-location |
+| `get_datetime` | 获取当前日期和时间，支持自定义格式 |
 | `screenshot` | 截取手机屏幕（结合 ocr 可分析屏幕内容） |
 | `plot_chart` | 根据数据生成图表（柱状图/折线图/饼图/散点图） |
 | `finish` | 标记任务完成并返回最终答复 |
@@ -241,7 +243,7 @@ pkg install clang cmake libcurl git libandroid-spawn
 
 ### 2️⃣ Agent 工具依赖（按需安装）
 
-Agent 的 37 个工具中，部分需要额外安装软件才能使用。以下是完整清单：
+Agent 的 40 个工具中，部分需要额外安装软件才能使用。以下是完整清单：
 
 | 工具 | 所需安装 | 说明 |
 |------|----------|------|
