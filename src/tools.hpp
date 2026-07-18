@@ -140,7 +140,7 @@ inline json::Value tool_schemas() {
         return json::Value{std::move(t)};
     };
 
-    // 1. read_file - supports large files with offset/limit
+    // 1. read_file - supports large files with offset/limit or line range
     {
         json::Object p;
         p["type"] = json::Value{"object"};
@@ -149,23 +149,32 @@ inline json::Value tool_schemas() {
         path_p["description"] = json::Value{"Path relative to workspace root (or absolute)."};
         props["path"] = json::Value{std::move(path_p)};
         json::Object offset_p; offset_p["type"] = json::Value{"integer"};
-        offset_p["description"] = json::Value{"Byte offset to start reading from (0 = beginning). Useful for large files."};
+        offset_p["description"] = json::Value{"Byte offset to start reading from (0 = beginning). Useful for large files. Ignored if start_line is set."};
         offset_p["default"] = json::Value{0};
         props["offset"] = json::Value{std::move(offset_p)};
         json::Object limit_p; limit_p["type"] = json::Value{"integer"};
-        limit_p["description"] = json::Value{"Maximum number of bytes to read. Omit or set to 0 to read until end (capped at max_bytes)."};
+        limit_p["description"] = json::Value{"Maximum number of bytes to read. Omit or set to 0 to read until end (capped at max_bytes). Ignored if start_line/end_line is set."};
         limit_p["default"] = json::Value{0};
         props["limit"] = json::Value{std::move(limit_p)};
         json::Object maxb_p; maxb_p["type"] = json::Value{"integer"};
         maxb_p["description"] = json::Value{"Maximum total bytes to return (default 200000). Increase for very large files."};
         maxb_p["default"] = json::Value{200000};
         props["max_bytes"] = json::Value{std::move(maxb_p)};
+        json::Object start_line_p; start_line_p["type"] = json::Value{"integer"};
+        start_line_p["description"] = json::Value{"Start line number (1-based). Reads from this line onward. Overrides offset/limit."};
+        start_line_p["default"] = json::Value{0};
+        props["start_line"] = json::Value{std::move(start_line_p)};
+        json::Object end_line_p; end_line_p["type"] = json::Value{"integer"};
+        end_line_p["description"] = json::Value{"End line number (1-based, inclusive). Only used when start_line is set. 0 means read to end of file."};
+        end_line_p["default"] = json::Value{0};
+        props["end_line"] = json::Value{std::move(end_line_p)};
         p["properties"] = json::Value{std::move(props)};
         p["required"] = json::make_array<std::string>({"path"});
         tools.push_back(fn("read_file",
-            "Read file contents with optional offset/limit for large files. "
-            "For small files just pass 'path'. For large files use offset and limit "
-            "to read in chunks, or increase max_bytes.",
+            "Read file contents with optional byte offset/limit for large files, "
+            "or line-based reading with start_line/end_line. "
+            "For small files just pass 'path'. For large files use offset/limit "
+            "to read in chunks, or use start_line/end_line to read by line numbers.",
             std::move(p)));
     }
 
@@ -239,7 +248,7 @@ inline json::Value tool_schemas() {
             std::move(p)));
     }
 
-    // 6. edit_file - Replace exact text in a file (like sed)
+    // 6. edit_file - Replace exact text in a file (like sed), optionally at a specific line
     {
         json::Object p;
         p["type"] = json::Value{"object"};
@@ -248,17 +257,23 @@ inline json::Value tool_schemas() {
         path_p["description"] = json::Value{"Path relative to workspace root."};
         props["path"] = json::Value{std::move(path_p)};
         json::Object old_p; old_p["type"] = json::Value{"string"};
-        old_p["description"] = json::Value{"Exact text to search for (must match exactly, including whitespace)."};
+        old_p["description"] = json::Value{"Exact text to search for (must match exactly, including whitespace). Ignored if line is set."};
         props["old_text"] = json::Value{std::move(old_p)};
         json::Object new_p; new_p["type"] = json::Value{"string"};
         new_p["description"] = json::Value{"Replacement text."};
         props["new_text"] = json::Value{std::move(new_p)};
+        json::Object line_p; line_p["type"] = json::Value{"integer"};
+        line_p["description"] = json::Value{"Line number (1-based) to replace. When set, replaces the entire line content with new_text, ignoring old_text."};
+        line_p["default"] = json::Value{0};
+        props["line"] = json::Value{std::move(line_p)};
         p["properties"] = json::Value{std::move(props)};
-        p["required"] = json::make_array<std::string>({"path", "old_text", "new_text"});
+        p["required"] = json::make_array<std::string>({"path", "new_text"});
         tools.push_back(fn("edit_file",
-            "Replace the first occurrence of old_text with new_text in a file. "
+            "Replace the first occurrence of old_text with new_text in a file, "
+            "or replace an entire line by number. "
             "Useful for making targeted edits without rewriting the entire file. "
-            "The old_text must match exactly, including indentation and line endings.",
+            "The old_text must match exactly, including indentation and line endings. "
+            "Use 'line' parameter to replace a specific line by number.",
             std::move(p)));
     }
 
@@ -404,11 +419,20 @@ inline json::Value tool_schemas() {
         paths_p["items"] = json::Value{std::move(items_p)};
         paths_p["description"] = json::Value{"Array of file paths to read."};
         props["paths"] = json::Value{std::move(paths_p)};
+        json::Object start_line_p; start_line_p["type"] = json::Value{"integer"};
+        start_line_p["description"] = json::Value{"Start line number (1-based). Applies to all files. Overrides max_bytes."};
+        start_line_p["default"] = json::Value{0};
+        props["start_line"] = json::Value{std::move(start_line_p)};
+        json::Object end_line_p; end_line_p["type"] = json::Value{"integer"};
+        end_line_p["description"] = json::Value{"End line number (1-based, inclusive). Only used when start_line is set. 0 means read to end."};
+        end_line_p["default"] = json::Value{0};
+        props["end_line"] = json::Value{std::move(end_line_p)};
         p["properties"] = json::Value{std::move(props)};
         p["required"] = json::make_array<std::string>({"paths"});
         tools.push_back(fn("read_multiple_files",
             "Read multiple files at once. Returns each file's content separated by headers. "
-            "More efficient than calling read_file multiple times.",
+            "More efficient than calling read_file multiple times. "
+            "Supports start_line/end_line for line-based reading.",
             std::move(p)));
     }
 
@@ -1046,6 +1070,59 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             if (!fs::is_regular_file(resolved, ec)) return std::format("[error: not a regular file: {}]", resolved.string());
 
             auto file_size = fs::file_size(resolved, ec);
+            int start_line = get_int("start_line", 0);
+            int end_line = get_int("end_line", 0);
+
+            // Line-based reading mode (start_line > 0)
+            if (start_line > 0) {
+                std::ifstream f(resolved);
+                if (!f) return std::format("[error: cannot open: {}]", resolved.string());
+
+                std::vector<std::string> all_lines;
+                std::string line;
+                while (std::getline(f, line)) {
+                    all_lines.push_back(line);
+                }
+                size_t total_lines = all_lines.size();
+
+                if (start_line > static_cast<int>(total_lines)) {
+                    return std::format("[error: start_line {} exceeds file length ({} lines)]",
+                                       start_line, total_lines);
+                }
+
+                size_t from = static_cast<size_t>(start_line - 1);  // 0-based
+                size_t to = (end_line > 0) ? static_cast<size_t>(end_line) : total_lines;
+                if (to > total_lines) to = total_lines;
+
+                size_t max_bytes = static_cast<size_t>(std::max(1024, get_int("max_bytes", 200000)));
+                std::ostringstream ss;
+                size_t bytes_written = 0;
+                bool truncated = false;
+
+                for (size_t i = from; i < to; ++i) {
+                    std::string ln = all_lines[i] + '\n';
+                    if (bytes_written + ln.size() > max_bytes) {
+                        truncated = true;
+                        break;
+                    }
+                    ss << ln;
+                    bytes_written += ln.size();
+                }
+
+                if (truncated) {
+                    ss << std::format("[... truncated at {} bytes, showing lines {}-{} of {}]\n",
+                                      max_bytes, start_line,
+                                      static_cast<int>(from + (to - from)), total_lines);
+                } else {
+                    ss << std::format("[showing lines {}-{} of {}]\n",
+                                      start_line,
+                                      (end_line > 0 && end_line <= static_cast<int>(total_lines)) ? end_line : static_cast<int>(total_lines),
+                                      total_lines);
+                }
+                return ss.str();
+            }
+
+            // Byte-based reading mode (original)
             size_t offset = static_cast<size_t>(std::max(0, get_int("offset", 0)));
             size_t limit = static_cast<size_t>(std::max(0, get_int("limit", 0)));
             size_t max_bytes = static_cast<size_t>(std::max(1024, get_int("max_bytes", 200000)));
@@ -1143,11 +1220,43 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             std::string path = get_str("path");
             std::string old_text = get_str("old_text");
             std::string new_text = get_str("new_text");
+            int line = get_int("line", 0);
             if (path.empty()) return "[tool error: 'path' required]";
-            if (old_text.empty()) return "[tool error: 'old_text' required]";
+            if (new_text.empty() && line == 0) return "[tool error: 'new_text' required]";
             fs::path resolved = resolve_under_root(root, path);
             std::error_code ec;
             if (!fs::exists(resolved, ec)) return std::format("[error: file not found: {}]", resolved.string());
+
+            // Line-based edit mode
+            if (line > 0) {
+                std::ifstream f(resolved);
+                if (!f) return std::format("[error: cannot open: {}]", resolved.string());
+                std::vector<std::string> all_lines;
+                std::string l;
+                while (std::getline(f, l)) {
+                    all_lines.push_back(l);
+                }
+                f.close();
+
+                if (line > static_cast<int>(all_lines.size())) {
+                    return std::format("[error: line {} exceeds file length ({} lines)]",
+                                       line, all_lines.size());
+                }
+
+                all_lines[static_cast<size_t>(line - 1)] = new_text;
+
+                std::ofstream of(resolved, std::ios::binary | std::ios::trunc);
+                if (!of) return std::format("[error: cannot write: {}]", resolved.string());
+                for (size_t i = 0; i < all_lines.size(); ++i) {
+                    of << all_lines[i];
+                    if (i + 1 < all_lines.size()) of << '\n';
+                }
+                of.close();
+                return std::format("[ok: replaced line {} in '{}']", line, path);
+            }
+
+            // Text-based edit mode (original)
+            if (old_text.empty()) return "[tool error: 'old_text' required when 'line' is not set]";
             std::ifstream f(resolved, std::ios::binary);
             if (!f) return std::format("[error: cannot open: {}]", resolved.string());
             std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
@@ -1325,8 +1434,10 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             auto paths = get_array("paths");
             if (paths.empty()) return "[tool error: 'paths' array required]";
             size_t max_bytes_per_file = static_cast<size_t>(std::max(1024, get_int("max_bytes", 100000)));
+            int start_line = get_int("start_line", 0);
+            int end_line = get_int("end_line", 0);
             std::ostringstream ss;
-            
+
             for (size_t i = 0; i < paths.size(); ++i) {
                 if (!paths[i].is_string()) {
                     ss << std::format("[error: paths[{}] is not a string]\n", i);
@@ -1340,6 +1451,38 @@ inline std::string execute(const std::string& name, std::string_view arguments,
                         ss << std::format("===== {} (NOT FOUND) =====\n", p);
                         continue;
                     }
+
+                    // Line-based reading mode
+                    if (start_line > 0) {
+                        std::ifstream f(resolved);
+                        if (!f) {
+                            ss << std::format("===== {} (CANNOT OPEN) =====\n", p);
+                            continue;
+                        }
+                        std::vector<std::string> all_lines;
+                        std::string line;
+                        while (std::getline(f, line)) {
+                            all_lines.push_back(line);
+                        }
+                        size_t total_lines = all_lines.size();
+
+                        if (start_line > static_cast<int>(total_lines)) {
+                            ss << std::format("===== {} (start_line {} > {} lines) =====\n", p, start_line, total_lines);
+                            continue;
+                        }
+
+                        size_t from = static_cast<size_t>(start_line - 1);
+                        size_t to = (end_line > 0) ? static_cast<size_t>(end_line) : total_lines;
+                        if (to > total_lines) to = total_lines;
+
+                        ss << std::format("===== {} (lines {}-{}/{}) =====\n", p, start_line, to, total_lines);
+                        for (size_t j = from; j < to; ++j) {
+                            ss << all_lines[j] << '\n';
+                        }
+                        continue;
+                    }
+
+                    // Byte-based reading mode (original)
                     auto fsize = fs::file_size(resolved, ec);
                     std::ifstream f(resolved, std::ios::binary);
                     if (!f) {
