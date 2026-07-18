@@ -10,8 +10,7 @@
 
 | 环境 | 说明 |
 |------|------|
-| **Android Termux** ✅ | 首选目标平台，已内置 Termux 前缀探测与 libc++ ABI 适配 |
-| 桌面 Linux | 也可运行，但项目构建系统优先为 Termux 优化 |
+| **Android Termux** ✅ | 唯一支持的目标平台，已内置 Termux 前缀探测与 libc++ ABI 适配 |
 
 ---
 
@@ -23,14 +22,34 @@
 - 支持**流式输出**，实时显示模型回复与工具调用过程
 - 内置**重复检测**：连续相同工具调用超过 3 次自动终止，防止死循环
 
-### 🛠️ 内置工具集
+### 🛠️ Agent 工具集（模型可调用的工具）
+
+Agent 模型可通过 Function Calling 机制调用以下 **23 个工具**，自主完成代码编写、文件操作、网络请求、数据解析等任务：
 
 | 工具 | 作用 |
 |------|------|
-| `read_file` | 读取工作区内文本文件 |
+| `read_file` | 读取工作区内文本文件（支持 offset/limit 分段读取大文件） |
 | `write_file` | 创建/覆盖文件（自动创建父目录） |
 | `list_dir` | 列出目录条目 |
 | `run_command` | 通过 `/bin/sh -c` 执行 shell 命令（带超时与退出码） |
+| `edit_file` | 替换文件中首次出现的精确文本（精准定位修改） |
+| `delete_file` | 删除文件或空目录 |
+| `rename_file` | 重命名/移动文件或目录 |
+| `copy_file` | 复制文件或目录（自动创建父目录） |
+| `append_file` | 追加内容到文件末尾（文件不存在则自动创建） |
+| `search_text` | 在文件中搜索文本或正则模式（基于 grep） |
+| `find_files` | 按 glob 模式查找文件（如 `*.cpp`、`*.{hpp,h}`） |
+| `file_info` | 获取文件/目录元数据（大小、类型、权限、修改时间） |
+| `read_multiple_files` | 一次读取多个文件（比多次调用 read_file 更高效） |
+| `write_multiple_files` | 一次写入多个文件（比多次调用 write_file 更高效） |
+| `fetch_url` | HTTP GET 获取 URL 内容（读取网页、API、文本） |
+| `parse_html` | 解析 HTML 内容，提取文本/链接/CSS 选择器匹配 |
+| `parse_xml` | 解析 XML 内容，支持 XPath 查询 |
+| `parse_json` | 解析 JSON 内容，支持点号路径查询（如 `data.items[0].name`） |
+| `render_mermaid` | 将 Mermaid 图表定义渲染为 SVG 图片文件 |
+| `image_info` | 获取图片元数据（格式、尺寸、色彩模式） |
+| `image_convert` | 转换图片格式或调整尺寸（支持 PNG/JPEG/GIF/BMP/WebP） |
+| `image_to_svg` | 将位图嵌入为 base64 SVG（或使用 potrace 矢量化） |
 | `finish` | 标记任务完成并返回最终答复 |
 
 ### 🔒 路径沙箱保护
@@ -304,7 +323,7 @@ cpp_agent/
 
 ## 🧠 工作原理
 
-1. **系统提示词**：启动时根据工作区根目录生成系统提示，告知模型可用工具与行为准则（先探索再修改、用 `write_file` 落地改动、用 `run_command` 验证构建/测试等）。
+1. **系统提示词**：启动时根据工作区根目录生成系统提示，告知模型可用工具（共 23 个）与行为准则（先探索再修改、用 `write_file` 落地改动、用 `run_command` 验证构建/测试等）。
 2. **Agent 循环**（`run_turn`）：
    - 将完整对话历史 + 工具 schema 发送给 LLM 的 `/chat/completions` 接口。
    - 若返回 `tool_calls`，逐个执行并把结果以 `tool` 角色消息回填到历史。
