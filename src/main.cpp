@@ -722,7 +722,7 @@ int main(int argc, char** argv) {
             if (cmd == "/undo") {
                 std::string undo_hash;
                 if (git::is_available()) {
-                    undo_hash = history.get_last_commit_hash();
+                    undo_hash = history.get_previous_commit_hash();
                 }
 
                 std::vector<llm::Message> restored;
