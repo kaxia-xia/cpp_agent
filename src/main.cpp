@@ -284,7 +284,7 @@ std::string build_system_prompt(const fs::path& root) {
         "  - image_convert(source, destination, width?, height?, quality?): convert/resize images.\n"
         "  - image_to_svg(source, destination): embed bitmap image as base64 in SVG.\n"
         "  - clipboard(action, content?): read/write Android system clipboard.\n"
-        "  - notify(title, content, priority?, alert_once?): send Android notification.\n"
+        "  - notify(title, content, priority?, alert_once?, sound?): send Android notification (use sound=true to play a sound).\n"
         "  - speak(text, lang?): text-to-speech on device.\n"
         "  - vibrate(duration_ms?): vibrate the device.\n"
         "  - run_python(code, timeout?): execute Python code snippet.\n"

@@ -662,6 +662,10 @@ inline json::Value tool_schemas() {
         alert_p["description"] = json::Value{"Whether to alert (sound/vibrate). Default true."};
         alert_p["default"] = json::Value{true};
         props["alert_once"] = json::Value{std::move(alert_p)};
+        json::Object sound_p; sound_p["type"] = json::Value{"boolean"};
+        sound_p["description"] = json::Value{"Whether to play a notification sound. Default false."};
+        sound_p["default"] = json::Value{false};
+        props["sound"] = json::Value{std::move(sound_p)};
         p["properties"] = json::Value{std::move(props)};
         p["required"] = json::make_array<std::string>({"title", "content"});
         tools.push_back(fn("notify",
@@ -1807,6 +1811,7 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             std::string content = get_str("content");
             std::string priority = get_str("priority");
             bool alert_once = get_bool("alert_once", true);
+            bool sound = get_bool("sound", false);
             if (title.empty()) return "[tool error: 'title' required]";
             if (content.empty()) return "[tool error: 'content' required]";
             if (priority.empty()) priority = "normal";
@@ -1820,9 +1825,10 @@ inline std::string execute(const std::string& name, std::string_view arguments,
                 return r;
             };
 
-            std::string cmd = std::format("termux-notification --title '{}' --content '{}' --priority {} {} 2>&1 || true",
+            std::string cmd = std::format("termux-notification --title '{}' --content '{}' --priority {} {} {} 2>&1 || true",
                                           esc(title), esc(content), esc(priority),
-                                          alert_once ? "--alert-once" : "");
+                                          alert_once ? "--alert-once" : "",
+                                          sound ? "--sound" : "");
             ShellResult r = run_shell(cmd, root, 10);
             if (r.exit_code == 0) return std::format("[ok: notification sent: '{}']", title);
             return std::format("[error: notification failed]\n{}", r.output);
