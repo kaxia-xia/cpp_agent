@@ -1846,7 +1846,9 @@ inline std::string execute(const std::string& name, std::string_view arguments,
                 if (c == '\'') escaped += "'\\''";
                 else escaped.push_back(c);
             }
-            std::string cmd = std::format("termux-tts-speak --lang '{}' '{}' 2>&1 || true", lang, escaped);
+            // termux-tts-speak uses -l (not --lang), and text must be piped via stdin
+            // to avoid argument parsing issues with spaces/special chars
+            std::string cmd = std::format("echo '{}' | termux-tts-speak -l '{}' 2>&1 || true", escaped, lang);
             ShellResult r = run_shell(cmd, root, 30);
             if (r.exit_code == 0) return std::format("[ok: speaking {} chars in '{}']", text.size(), lang);
             return std::format("[error: TTS failed]\n{}", r.output);
