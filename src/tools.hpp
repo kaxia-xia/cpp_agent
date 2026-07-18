@@ -663,8 +663,8 @@ inline json::Value tool_schemas() {
         alert_p["default"] = json::Value{true};
         props["alert_once"] = json::Value{std::move(alert_p)};
         json::Object sound_p; sound_p["type"] = json::Value{"boolean"};
-        sound_p["description"] = json::Value{"Whether to play a notification sound. Default false."};
-        sound_p["default"] = json::Value{false};
+        sound_p["description"] = json::Value{"Whether to play a notification sound. Default true."};
+        sound_p["default"] = json::Value{true};
         props["sound"] = json::Value{std::move(sound_p)};
         p["properties"] = json::Value{std::move(props)};
         p["required"] = json::make_array<std::string>({"title", "content"});
@@ -1811,7 +1811,7 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             std::string content = get_str("content");
             std::string priority = get_str("priority");
             bool alert_once = get_bool("alert_once", true);
-            bool sound = get_bool("sound", false);
+            bool sound = get_bool("sound", true);
             if (title.empty()) return "[tool error: 'title' required]";
             if (content.empty()) return "[tool error: 'content' required]";
             if (priority.empty()) priority = "normal";
