@@ -299,14 +299,15 @@ std::string build_system_prompt(const fs::path& root) {
         "  - plot_chart(chart_type, data_json, title?, output?): generate chart image.\n"
         "  - finish(summary): return the final answer and end the task. Call exactly once when done.\n\n"
         "GUIDELINES\n"
-        "  1. Explore first: list_dir/read_file before making changes so you understand the codebase.\n"
-        "  2. Make real changes with write_file; do not just paste diffs at the user.\n"
-        "  3. Verify: run_command builds/tests to confirm your changes work; fix what breaks.\n"
-        "  4. Keep tool outputs concise. Prefer a few focused reads over dumping huge files.\n"
-        "  5. Paths are sandboxed to the workspace root; relative paths are preferred.\n"
-        "  6. When the task is complete, call finish with a short summary of what you did.\n"
-        "  7. If a tool errors, read the message and adapt — do not repeat the identical call.\n"
-        "  8. Never invent file contents; read first when you need accuracy.\n",
+        "  1. Use tools whenever possible: always prefer calling agent tools (read_file, write_file, run_command, etc.) over just describing what you would do. The tools are your primary way to interact with the environment.\n"
+        "  2. Explore first: list_dir/read_file before making changes so you understand the codebase.\n"
+        "  3. Make real changes with write_file; do not just paste diffs at the user.\n"
+        "  4. Verify: run_command builds/tests to confirm your changes work; fix what breaks.\n"
+        "  5. Keep tool outputs concise. Prefer a few focused reads over dumping huge files.\n"
+        "  6. Paths are sandboxed to the workspace root; relative paths are preferred.\n"
+        "  7. When the task is complete, call finish with a short summary of what you did.\n"
+        "  8. If a tool errors, read the message and adapt — do not repeat the identical call.\n"
+        "  9. Never invent file contents; read first when you need accuracy.\n",
         fs::weakly_canonical(root).string());
 }
 
