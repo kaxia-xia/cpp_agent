@@ -621,6 +621,319 @@ inline json::Value tool_schemas() {
             std::move(p)));
     }
 
+    // ── 24. clipboard - read/write system clipboard ──────────────────
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object action_p; action_p["type"] = json::Value{"string"};
+        action_p["description"] = json::Value{"Action: 'get' to read clipboard, 'set' to write clipboard."};
+        action_p["enum"] = json::make_array<std::string>({"get", "set"});
+        props["action"] = json::Value{std::move(action_p)};
+        json::Object content_p; content_p["type"] = json::Value{"string"};
+        content_p["description"] = json::Value{"Content to write (required when action='set')."};
+        content_p["default"] = json::Value{""};
+        props["content"] = json::Value{std::move(content_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"action"});
+        tools.push_back(fn("clipboard",
+            "Read or write the Android system clipboard. "
+            "Use action='get' to retrieve clipboard text, action='set' with 'content' to set clipboard text. "
+            "Uses termux-clipboard-get / termux-clipboard-set.",
+            std::move(p)));
+    }
+
+    // ── 25. notify - send Android notification ───────────────────────
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object title_p; title_p["type"] = json::Value{"string"};
+        title_p["description"] = json::Value{"Notification title."};
+        props["title"] = json::Value{std::move(title_p)};
+        json::Object content_p; content_p["type"] = json::Value{"string"};
+        content_p["description"] = json::Value{"Notification content text."};
+        props["content"] = json::Value{std::move(content_p)};
+        json::Object priority_p; priority_p["type"] = json::Value{"string"};
+        priority_p["description"] = json::Value{"Priority: 'low', 'normal', 'high' (default: 'normal')."};
+        priority_p["default"] = json::Value{"normal"};
+        props["priority"] = json::Value{std::move(priority_p)};
+        json::Object alert_p; alert_p["type"] = json::Value{"boolean"};
+        alert_p["description"] = json::Value{"Whether to alert (sound/vibrate). Default true."};
+        alert_p["default"] = json::Value{true};
+        props["alert_once"] = json::Value{std::move(alert_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"title", "content"});
+        tools.push_back(fn("notify",
+            "Send a notification to the Android notification bar. "
+            "Uses termux-notification. Great for alerting when long tasks complete.",
+            std::move(p)));
+    }
+
+    // ── 26. speak - text-to-speech ───────────────────────────────────
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object text_p; text_p["type"] = json::Value{"string"};
+        text_p["description"] = json::Value{"Text to speak aloud."};
+        props["text"] = json::Value{std::move(text_p)};
+        json::Object lang_p; lang_p["type"] = json::Value{"string"};
+        lang_p["description"] = json::Value{"Language (e.g. 'zh', 'en'). Default: 'en'."};
+        lang_p["default"] = json::Value{"en"};
+        props["lang"] = json::Value{std::move(lang_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"text"});
+        tools.push_back(fn("speak",
+            "Convert text to speech and play it aloud on the device. "
+            "Uses termux-tts-speak. The agent can literally 'talk' to you!",
+            std::move(p)));
+    }
+
+    // ── 27. vibrate - haptic feedback ────────────────────────────────
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object dur_p; dur_p["type"] = json::Value{"integer"};
+        dur_p["description"] = json::Value{"Vibration duration in milliseconds (default: 200)."};
+        dur_p["default"] = json::Value{200};
+        props["duration_ms"] = json::Value{std::move(dur_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({});
+        tools.push_back(fn("vibrate",
+            "Make the device vibrate for a specified duration. "
+            "Uses termux-vibrate. Fun for feedback or alerts.",
+            std::move(p)));
+    }
+
+    // ── 28. run_python - execute Python code ─────────────────────────
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object code_p; code_p["type"] = json::Value{"string"};
+        code_p["description"] = json::Value{"Python code to execute."};
+        props["code"] = json::Value{std::move(code_p)};
+        json::Object to_p; to_p["type"] = json::Value{"integer"};
+        to_p["description"] = json::Value{"Timeout in seconds (default: 30)."};
+        to_p["default"] = json::Value{30};
+        props["timeout"] = json::Value{std::move(to_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"code"});
+        tools.push_back(fn("run_python",
+            "Execute a Python code snippet and return stdout+stderr. "
+            "Useful for quick calculations, data processing, text manipulation, "
+            "or any task that benefits from Python's standard library. "
+            "Runs with python3.",
+            std::move(p)));
+    }
+
+    // ── 29. ocr - optical character recognition ──────────────────────
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object path_p; path_p["type"] = json::Value{"string"};
+        path_p["description"] = json::Value{"Path to image file to perform OCR on."};
+        props["image_path"] = json::Value{std::move(path_p)};
+        json::Object lang_p; lang_p["type"] = json::Value{"string"};
+        lang_p["description"] = json::Value{"Language(s) for OCR, e.g. 'eng', 'chi_sim', 'eng+chi_sim'. Default: 'eng'."};
+        lang_p["default"] = json::Value{"eng"};
+        props["lang"] = json::Value{std::move(lang_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"image_path"});
+        tools.push_back(fn("ocr",
+            "Perform optical character recognition (OCR) on an image file. "
+            "Extracts text from images using Tesseract OCR engine. "
+            "Supports multiple languages (e.g. 'eng', 'chi_sim', 'eng+chi_sim'). "
+            "Requires tesseract to be installed.",
+            std::move(p)));
+    }
+
+    // ── 30. qr_encode - generate QR code ─────────────────────────────
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object data_p; data_p["type"] = json::Value{"string"};
+        data_p["description"] = json::Value{"Data to encode in the QR code (text, URL, etc.)."};
+        props["data"] = json::Value{std::move(data_p)};
+        json::Object out_p; out_p["type"] = json::Value{"string"};
+        out_p["description"] = json::Value{"Output image file path (e.g. 'qrcode.png')."};
+        props["output"] = json::Value{std::move(out_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"data", "output"});
+        tools.push_back(fn("qr_encode",
+            "Generate a QR code image from text or URL data. "
+            "Uses Python qrcode library. Outputs a PNG image file.",
+            std::move(p)));
+    }
+
+    // ── 31. qr_decode - decode QR code / barcode from image ─────────
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object path_p; path_p["type"] = json::Value{"string"};
+        path_p["description"] = json::Value{"Path to image file containing a QR code or barcode."};
+        props["image_path"] = json::Value{std::move(path_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"image_path"});
+        tools.push_back(fn("qr_decode",
+            "Decode a QR code or barcode from an image file. "
+            "Uses Python pyzbar library (wraps zbar). "
+            "Returns the decoded data content.",
+            std::move(p)));
+    }
+
+    // ── 32. diff_files - compare two files ───────────────────────────
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object f1_p; f1_p["type"] = json::Value{"string"};
+        f1_p["description"] = json::Value{"First file path."};
+        props["file1"] = json::Value{std::move(f1_p)};
+        json::Object f2_p; f2_p["type"] = json::Value{"string"};
+        f2_p["description"] = json::Value{"Second file path."};
+        props["file2"] = json::Value{std::move(f2_p)};
+        json::Object ctx_p; ctx_p["type"] = json::Value{"integer"};
+        ctx_p["description"] = json::Value{"Context lines around changes (default: 3)."};
+        ctx_p["default"] = json::Value{3};
+        props["context_lines"] = json::Value{std::move(ctx_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"file1", "file2"});
+        tools.push_back(fn("diff_files",
+            "Compare two files and show the differences (unified diff format). "
+            "Uses 'diff -u' internally. Useful for seeing what changed between versions.",
+            std::move(p)));
+    }
+
+    // ── 33. compress - create archive ────────────────────────────────
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object src_p; src_p["type"] = json::Value{"string"};
+        src_p["description"] = json::Value{"Source file or directory to compress."};
+        props["source"] = json::Value{std::move(src_p)};
+        json::Object dst_p; dst_p["type"] = json::Value{"string"};
+        dst_p["description"] = json::Value{"Output archive path (e.g. 'archive.zip', 'archive.tar.gz')."};
+        props["output"] = json::Value{std::move(dst_p)};
+        json::Object fmt_p; fmt_p["type"] = json::Value{"string"};
+        fmt_p["description"] = json::Value{"Archive format: 'zip' or 'tar.gz' (default: auto from output extension)."};
+        fmt_p["default"] = json::Value{""};
+        props["format"] = json::Value{std::move(fmt_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"source", "output"});
+        tools.push_back(fn("compress",
+            "Create a compressed archive (zip or tar.gz) from a file or directory. "
+            "Uses zip or tar+gzip internally.",
+            std::move(p)));
+    }
+
+    // ── 34. decompress - extract archive ─────────────────────────────
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object arc_p; arc_p["type"] = json::Value{"string"};
+        arc_p["description"] = json::Value{"Archive file path to extract (zip, tar.gz, tar.bz2, etc.)."};
+        props["archive"] = json::Value{std::move(arc_p)};
+        json::Object dst_p; dst_p["type"] = json::Value{"string"};
+        dst_p["description"] = json::Value{"Output directory to extract into (default: same name as archive without extension)."};
+        dst_p["default"] = json::Value{""};
+        props["output_dir"] = json::Value{std::move(dst_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"archive"});
+        tools.push_back(fn("decompress",
+            "Extract a compressed archive (zip, tar.gz, tar.bz2, tar.xz, etc.). "
+            "Auto-detects format from file extension. Uses unzip or tar internally.",
+            std::move(p)));
+    }
+
+    // ── 35. system_info - get device/system information ──────────────
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object cat_p; cat_p["type"] = json::Value{"string"};
+        cat_p["description"] = json::Value{"Category: 'all', 'battery', 'cpu', 'memory', 'storage', 'network'. Default: 'all'."};
+        cat_p["default"] = json::Value{"all"};
+        props["category"] = json::Value{std::move(cat_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({});
+        tools.push_back(fn("system_info",
+            "Get information about the Android device: battery status, CPU info, "
+            "memory usage, storage, network interfaces. "
+            "Uses termux-battery-status, /proc filesystem, and other system commands.",
+            std::move(p)));
+    }
+
+    // ── 36. weather - query weather ──────────────────────────────────
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object loc_p; loc_p["type"] = json::Value{"string"};
+        loc_p["description"] = json::Value{"Location (city name or coordinates). Default: auto-detect from IP."};
+        loc_p["default"] = json::Value{""};
+        props["location"] = json::Value{std::move(loc_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({});
+        tools.push_back(fn("weather",
+            "Query current weather and forecast for a location. "
+            "Uses wttr.in API via curl. Returns temperature, conditions, humidity, wind, etc. "
+            "If no location given, auto-detects from IP address.",
+            std::move(p)));
+    }
+
+    // ── 37. screenshot - capture device screen ───────────────────────
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object out_p; out_p["type"] = json::Value{"string"};
+        out_p["description"] = json::Value{"Output PNG file path (default: 'screenshot.png')."};
+        out_p["default"] = json::Value{"screenshot.png"};
+        props["output"] = json::Value{std::move(out_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({});
+        tools.push_back(fn("screenshot",
+            "Capture a screenshot of the device screen. "
+            "Uses termux-screencap. The agent can 'see' what's on your screen! "
+            "Combine with image_info or ocr for screen analysis.",
+            std::move(p)));
+    }
+
+    // ── 38. plot_chart - generate data visualization ─────────────────
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object type_p; type_p["type"] = json::Value{"string"};
+        type_p["description"] = json::Value{"Chart type: 'bar', 'line', 'pie', 'scatter'."};
+        props["chart_type"] = json::Value{std::move(type_p)};
+        json::Object data_p; data_p["type"] = json::Value{"string"};
+        data_p["description"] = json::Value{"Data in JSON format. For bar/line: {\"labels\":[\"A\",\"B\"],\"values\":[10,20]}. For pie: same. For scatter: {\"x\":[1,2,3],\"y\":[4,5,6]}."};
+        props["data_json"] = json::Value{std::move(data_p)};
+        json::Object title_p; title_p["type"] = json::Value{"string"};
+        title_p["description"] = json::Value{"Chart title (optional)."};
+        title_p["default"] = json::Value{""};
+        props["title"] = json::Value{std::move(title_p)};
+        json::Object out_p; out_p["type"] = json::Value{"string"};
+        out_p["description"] = json::Value{"Output image file path (e.g. 'chart.png'). Default: 'chart.png'."};
+        out_p["default"] = json::Value{"chart.png"};
+        props["output"] = json::Value{std::move(out_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"chart_type", "data_json"});
+        tools.push_back(fn("plot_chart",
+            "Generate a chart/plot image from data. Supports bar, line, pie, and scatter charts. "
+            "Uses Python matplotlib. Returns the path to the generated image.",
+            std::move(p)));
+    }
+
     return json::Value{std::move(tools)};
 }
 
@@ -1462,6 +1775,557 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             }
             auto out_size = fs::file_size(dst_resolved, ec);
             return std::format("[ok: '{}' -> '{}' ({} bytes)]\n{}", src, dst, out_size, r.output);
+        }
+
+        // ── clipboard ────────────────────────────────────────────────
+        if (name == "clipboard") {
+            std::string action = get_str("action");
+            if (action.empty()) return "[tool error: 'action' required (get or set)]";
+            if (action == "get") {
+                ShellResult r = run_shell("termux-clipboard-get 2>/dev/null || true", root, 10);
+                if (r.output.empty()) return "[clipboard is empty]";
+                return std::format("[clipboard content ({} bytes)]\n{}", r.output.size(), r.output);
+            } else if (action == "set") {
+                std::string content = get_str("content");
+                if (content.empty()) return "[tool error: 'content' required when action='set']";
+                std::string escaped;
+                for (char c : content) {
+                    if (c == '\'') escaped += "'\\''";
+                    else escaped.push_back(c);
+                }
+                std::string cmd = std::format("printf '%s' '{}' | termux-clipboard-set 2>&1 || true", escaped);
+                ShellResult r = run_shell(cmd, root, 10);
+                if (r.exit_code == 0) return std::format("[ok: wrote {} bytes to clipboard]", content.size());
+                return std::format("[error: failed to set clipboard]\n{}", r.output);
+            }
+            return std::format("[tool error: unknown action '{}' (use 'get' or 'set')]", action);
+        }
+
+        // ── notify ───────────────────────────────────────────────────
+        if (name == "notify") {
+            std::string title = get_str("title");
+            std::string content = get_str("content");
+            std::string priority = get_str("priority");
+            bool alert_once = get_bool("alert_once", true);
+            if (title.empty()) return "[tool error: 'title' required]";
+            if (content.empty()) return "[tool error: 'content' required]";
+            if (priority.empty()) priority = "normal";
+
+            auto esc = [](const std::string& s) {
+                std::string r;
+                for (char c : s) {
+                    if (c == '\'') r += "'\\''";
+                    else r.push_back(c);
+                }
+                return r;
+            };
+
+            std::string cmd = std::format("termux-notification --title '{}' --content '{}' --priority {} {} 2>&1 || true",
+                                          esc(title), esc(content), esc(priority),
+                                          alert_once ? "--alert-once" : "");
+            ShellResult r = run_shell(cmd, root, 10);
+            if (r.exit_code == 0) return std::format("[ok: notification sent: '{}']", title);
+            return std::format("[error: notification failed]\n{}", r.output);
+        }
+
+        // ── speak ────────────────────────────────────────────────────
+        if (name == "speak") {
+            std::string text = get_str("text");
+            std::string lang = get_str("lang");
+            if (text.empty()) return "[tool error: 'text' required]";
+            if (lang.empty()) lang = "en";
+
+            std::string escaped;
+            for (char c : text) {
+                if (c == '\'') escaped += "'\\''";
+                else escaped.push_back(c);
+            }
+            std::string cmd = std::format("termux-tts-speak --lang '{}' '{}' 2>&1 || true", lang, escaped);
+            ShellResult r = run_shell(cmd, root, 30);
+            if (r.exit_code == 0) return std::format("[ok: speaking {} chars in '{}']", text.size(), lang);
+            return std::format("[error: TTS failed]\n{}", r.output);
+        }
+
+        // ── vibrate ──────────────────────────────────────────────────
+        if (name == "vibrate") {
+            int dur = std::clamp(get_int("duration_ms", 200), 50, 10000);
+            std::string cmd = std::format("termux-vibrate -d {} 2>&1 || true", dur);
+            ShellResult r = run_shell(cmd, root, dur / 1000 + 5);
+            if (r.exit_code == 0) return std::format("[ok: vibrated for {}ms]", dur);
+            return std::format("[error: vibration failed]\n{}", r.output);
+        }
+
+        // ── run_python ───────────────────────────────────────────────
+        if (name == "run_python") {
+            std::string code = get_str("code");
+            int timeout = std::clamp(get_int("timeout", 30), 5, 120);
+            if (code.empty()) return "[tool error: 'code' required]";
+
+            std::string pyfile = (fs::temp_directory_path() / "agent_run_python.py").string();
+            {
+                std::ofstream pf(pyfile);
+                pf << "import sys, json, math, random, datetime, os, re, collections, itertools, statistics\n";
+                pf << code << "\n";
+            }
+
+            std::string cmd = std::format("python3 '{}' 2>&1 || true", pyfile);
+            ShellResult r = run_shell(cmd, root, timeout);
+            if (r.output.empty()) r.output = "(no output)\n";
+            return std::format("[python exit_code={}]\n{}", r.exit_code, truncate(r.output, 100000));
+        }
+
+        // ── ocr ──────────────────────────────────────────────────────
+        if (name == "ocr") {
+            std::string image_path = get_str("image_path");
+            std::string lang = get_str("lang");
+            if (image_path.empty()) return "[tool error: 'image_path' required]";
+            if (lang.empty()) lang = "eng";
+
+            fs::path resolved = resolve_under_root(root, image_path);
+            std::error_code ec;
+            if (!fs::exists(resolved, ec)) return std::format("[error: file not found: {}]", resolved.string());
+
+            std::string escaped_path;
+            for (char c : resolved.string()) {
+                if (c == '\'') escaped_path += "'\\''";
+                else escaped_path.push_back(c);
+            }
+
+            std::string cmd = std::format("tesseract '{}' stdout -l '{}' 2>/dev/null || true", escaped_path, lang);
+            ShellResult r = run_shell(cmd, root, 60);
+            if (r.exit_code != 0 || r.output.empty()) {
+                return std::format("[error: OCR failed. Is tesseract installed? Try: pkg install tesseract]\n{}", r.output);
+            }
+            return std::format("[OCR result from '{}' (lang={})]\n{}", image_path, lang, r.output);
+        }
+
+        // ── qr_encode ────────────────────────────────────────────────
+        if (name == "qr_encode") {
+            std::string data = get_str("data");
+            std::string output = get_str("output");
+            if (data.empty()) return "[tool error: 'data' required]";
+            if (output.empty()) return "[tool error: 'output' required]";
+
+            fs::path out_path = resolve_under_root(root, output);
+            fs::create_directories(out_path.parent_path());
+
+            std::string py_script = "import sys, qrcode\n"
+                "data = sys.argv[1]\n"
+                "out = sys.argv[2]\n"
+                "img = qrcode.make(data)\n"
+                "img.save(out)\n"
+                "print(f'OK: QR code saved to {out}')\n";
+
+            std::string pyfile = (fs::temp_directory_path() / "agent_qr_encode.py").string();
+            { std::ofstream pf(pyfile); pf << py_script; }
+
+            std::string escaped_data;
+            for (char c : data) {
+                if (c == '\'') escaped_data += "'\\''";
+                else escaped_data.push_back(c);
+            }
+
+            std::string cmd = std::format("python3 '{}' '{}' '{}' 2>&1 || true",
+                                          pyfile, escaped_data, out_path.string());
+            ShellResult r = run_shell(cmd, root, 30);
+            if (r.exit_code != 0 || r.output.find("OK:") == std::string::npos) {
+                return std::format("[error: QR code generation failed]\n{}", r.output);
+            }
+            std::error_code ec;
+            auto sz = fs::file_size(out_path, ec);
+            return std::format("[ok: QR code generated -> '{}' ({} bytes)]\nData: {}", output, sz, data);
+        }
+
+        // ── qr_decode ────────────────────────────────────────────────
+        if (name == "qr_decode") {
+            std::string image_path = get_str("image_path");
+            if (image_path.empty()) return "[tool error: 'image_path' required]";
+
+            fs::path resolved = resolve_under_root(root, image_path);
+            std::error_code ec;
+            if (!fs::exists(resolved, ec)) return std::format("[error: file not found: {}]", resolved.string());
+
+            std::string py_script = "import sys\n"
+                "try:\n"
+                "  from PIL import Image\n"
+                "  from pyzbar.pyzbar import decode\n"
+                "  img = Image.open(sys.argv[1])\n"
+                "  results = decode(img)\n"
+                "  if results:\n"
+                "    for r in results:\n"
+                "      print(f'Type: {r.type}, Data: {r.data.decode(\"utf-8\", errors=\"replace\")}')\n"
+                "  else:\n"
+                "    print('NO_RESULT')\n"
+                "except ImportError:\n"
+                "  print('NO_PYZBAR')\n";
+
+            std::string pyfile = (fs::temp_directory_path() / "agent_qr_decode.py").string();
+            { std::ofstream pf(pyfile); pf << py_script; }
+
+            std::string cmd = std::format("python3 '{}' '{}' 2>&1 || true", pyfile, resolved.string());
+            ShellResult r = run_shell(cmd, root, 30);
+
+            if (r.output.find("NO_PYZBAR") != std::string::npos) {
+                std::string escaped_path;
+                for (char c : resolved.string()) {
+                    if (c == '\'') escaped_path += "'\\''";
+                    else escaped_path.push_back(c);
+                }
+                cmd = std::format("zbarimg --quiet '{}' 2>/dev/null || true", escaped_path);
+                r = run_shell(cmd, root, 30);
+                if (r.output.empty()) return "[no barcode/QR code found in image]";
+                return std::format("[barcode/QR result from '{}']\n{}", image_path, r.output);
+            }
+
+            if (r.output.find("NO_RESULT") != std::string::npos) {
+                return std::format("[no barcode/QR code found in '{}']", image_path);
+            }
+            if (r.output.empty()) return std::format("[error: could not decode '{}']", image_path);
+            return std::format("[barcode/QR result from '{}']\n{}", image_path, r.output);
+        }
+
+        // ── diff_files ───────────────────────────────────────────────
+        if (name == "diff_files") {
+            std::string f1 = get_str("file1");
+            std::string f2 = get_str("file2");
+            int ctx = std::max(0, get_int("context_lines", 3));
+            if (f1.empty() || f2.empty()) return "[tool error: 'file1' and 'file2' required]";
+
+            fs::path f1_res = resolve_under_root(root, f1);
+            fs::path f2_res = resolve_under_root(root, f2);
+            std::error_code ec;
+            if (!fs::exists(f1_res, ec)) return std::format("[error: file not found: {}]", f1);
+            if (!fs::exists(f2_res, ec)) return std::format("[error: file not found: {}]", f2);
+
+            auto esc = [](const fs::path& p) {
+                std::string s = p.string();
+                std::string r;
+                for (char c : s) {
+                    if (c == '\'') r += "'\\''";
+                    else r.push_back(c);
+                }
+                return r;
+            };
+
+            std::string cmd = std::format("diff -u -U{} '{}' '{}' 2>/dev/null || true", ctx, esc(f1_res), esc(f2_res));
+            ShellResult r = run_shell(cmd, root, 30);
+            if (r.output.empty()) return "[files are identical]";
+            return truncate(r.output, 100000);
+        }
+
+        // ── compress ─────────────────────────────────────────────────
+        if (name == "compress") {
+            std::string src = get_str("source");
+            std::string output = get_str("output");
+            std::string format = get_str("format");
+            if (src.empty()) return "[tool error: 'source' required]";
+            if (output.empty()) return "[tool error: 'output' required]";
+
+            fs::path src_res = resolve_under_root(root, src);
+            fs::path out_res = resolve_under_root(root, output);
+            std::error_code ec;
+            if (!fs::exists(src_res, ec)) return std::format("[error: source not found: {}]", src);
+            fs::create_directories(out_res.parent_path(), ec);
+
+            if (format.empty()) {
+                std::string ext = out_res.extension().string();
+                if (ext == ".zip") format = "zip";
+                else if (ext == ".gz" || ext == ".tgz" || ext == ".tar.gz") format = "tar.gz";
+                else format = "zip";
+            }
+
+            auto esc = [](const fs::path& p) {
+                std::string s = p.string();
+                std::string r;
+                for (char c : s) {
+                    if (c == '\'') r += "'\\''";
+                    else r.push_back(c);
+                }
+                return r;
+            };
+
+            std::string cmd;
+            if (format == "zip") {
+                if (fs::is_directory(src_res, ec)) {
+                    cmd = std::format("cd '{}' && zip -r '{}' . 2>&1 || true",
+                                      esc(src_res), esc(out_res));
+                } else {
+                    cmd = std::format("zip '{}' '{}' 2>&1 || true", esc(out_res), esc(src_res));
+                }
+            } else if (format == "tar.gz") {
+                std::string parent = src_res.parent_path().string();
+                std::string name = src_res.filename().string();
+                cmd = std::format("cd '{}' && tar -czf '{}' '{}' 2>&1 || true",
+                                  esc(fs::path(parent)), esc(out_res), name);
+            } else {
+                return std::format("[error: unsupported format '{}'. Use 'zip' or 'tar.gz']", format);
+            }
+
+            ShellResult r = run_shell(cmd, root, 120);
+            if (r.exit_code != 0 || !fs::exists(out_res, ec)) {
+                return std::format("[error: compression failed]\n{}", r.output);
+            }
+            auto sz = fs::file_size(out_res, ec);
+            return std::format("[ok: compressed '{}' -> '{}' ({} bytes)]\n{}", src, output, sz, r.output);
+        }
+
+        // ── decompress ───────────────────────────────────────────────
+        if (name == "decompress") {
+            std::string archive = get_str("archive");
+            std::string output_dir = get_str("output_dir");
+            if (archive.empty()) return "[tool error: 'archive' required]";
+
+            fs::path arc_res = resolve_under_root(root, archive);
+            std::error_code ec;
+            if (!fs::exists(arc_res, ec)) return std::format("[error: archive not found: {}]", archive);
+
+            if (output_dir.empty()) {
+                output_dir = arc_res.stem().string();
+                std::string fn = arc_res.filename().string();
+                if (fn.size() > 7 && fn.substr(fn.size()-7) == ".tar.gz") {
+                    output_dir = fn.substr(0, fn.size()-7);
+                }
+            }
+            fs::path out_res = resolve_under_root(root, output_dir);
+            fs::create_directories(out_res, ec);
+
+            auto esc = [](const fs::path& p) {
+                std::string s = p.string();
+                std::string r;
+                for (char c : s) {
+                    if (c == '\'') r += "'\\''";
+                    else r.push_back(c);
+                }
+                return r;
+            };
+
+            std::string ext = arc_res.extension().string();
+            std::string fn = arc_res.filename().string();
+            std::string cmd;
+            if (ext == ".zip") {
+                cmd = std::format("unzip -o '{}' -d '{}' 2>&1 || true", esc(arc_res), esc(out_res));
+            } else if (ext == ".gz" || ext == ".tgz" || (fn.size() > 7 && fn.substr(fn.size()-7) == ".tar.gz")) {
+                cmd = std::format("tar -xzf '{}' -C '{}' 2>&1 || true", esc(arc_res), esc(out_res));
+            } else if (ext == ".bz2" || (fn.size() > 8 && fn.substr(fn.size()-8) == ".tar.bz2")) {
+                cmd = std::format("tar -xjf '{}' -C '{}' 2>&1 || true", esc(arc_res), esc(out_res));
+            } else if (ext == ".xz" || (fn.size() > 7 && fn.substr(fn.size()-7) == ".tar.xz")) {
+                cmd = std::format("tar -xJf '{}' -C '{}' 2>&1 || true", esc(arc_res), esc(out_res));
+            } else {
+                cmd = std::format("tar -xf '{}' -C '{}' 2>&1 || true", esc(arc_res), esc(out_res));
+            }
+
+            ShellResult r = run_shell(cmd, root, 120);
+            if (r.exit_code != 0) {
+                return std::format("[error: extraction may have failed]\n{}", r.output);
+            }
+            return std::format("[ok: extracted '{}' -> '{}']\n{}", archive, output_dir, r.output);
+        }
+
+        // ── system_info ──────────────────────────────────────────────
+        if (name == "system_info") {
+            std::string category = get_str("category");
+            if (category.empty()) category = "all";
+
+            std::ostringstream ss;
+
+            if (category == "all" || category == "battery") {
+                ShellResult r = run_shell("termux-battery-status 2>/dev/null || true", root, 10);
+                if (!r.output.empty()) {
+                    ss << "=== Battery ===\n" << r.output << "\n";
+                } else {
+                    ss << "=== Battery ===\n(termux-battery-status not available)\n\n";
+                }
+            }
+
+            if (category == "all" || category == "cpu") {
+                ShellResult r = run_shell("cat /proc/cpuinfo 2>/dev/null | head -30 || true", root, 5);
+                if (!r.output.empty()) ss << "=== CPU ===\n" << r.output << "\n";
+                ShellResult r2 = run_shell("cat /proc/loadavg 2>/dev/null || true", root, 5);
+                if (!r2.output.empty()) ss << "Load: " << r2.output << "\n";
+            }
+
+            if (category == "all" || category == "memory") {
+                ShellResult r = run_shell("cat /proc/meminfo 2>/dev/null | head -10 || true", root, 5);
+                if (!r.output.empty()) ss << "=== Memory ===\n" << r.output << "\n";
+            }
+
+            if (category == "all" || category == "storage") {
+                ShellResult r = run_shell("df -h /data/data/com.termux/files 2>/dev/null || df -h / 2>/dev/null || true", root, 5);
+                if (!r.output.empty()) ss << "=== Storage ===\n" << r.output << "\n";
+            }
+
+            if (category == "all" || category == "network") {
+                ShellResult r = run_shell("ip addr show 2>/dev/null | head -30 || ifconfig 2>/dev/null || true", root, 5);
+                if (!r.output.empty()) ss << "=== Network ===\n" << r.output << "\n";
+            }
+
+            if (category == "all") {
+                ShellResult r = run_shell("uname -a 2>/dev/null || true", root, 5);
+                if (!r.output.empty()) ss << "=== System ===\n" << r.output << "\n";
+                ShellResult r2 = run_shell("getprop ro.build.version.release 2>/dev/null || echo 'unknown'", root, 5);
+                if (!r2.output.empty()) ss << "Android: " << r2.output;
+            }
+
+            return ss.str();
+        }
+
+        // ── weather ──────────────────────────────────────────────────
+        if (name == "weather") {
+            std::string location = get_str("location");
+
+            std::string url;
+            if (location.empty()) {
+                url = "https://wttr.in?format=4&m";
+            } else {
+                std::string escaped;
+                for (char c : location) {
+                    if (c == '\'') escaped += "'\\''";
+                    else escaped.push_back(c);
+                }
+                url = std::format("https://wttr.in/{}?format=4&m", escaped);
+            }
+
+            std::string escaped_url;
+            for (char c : url) {
+                if (c == '\'') escaped_url += "'\\''";
+                else escaped_url.push_back(c);
+            }
+
+            std::string cmd = std::format("curl -sL --max-time 15 '{}' 2>/dev/null || true", escaped_url);
+            ShellResult r = run_shell(cmd, root, 20);
+            std::string short_weather = r.output;
+
+            std::string detail_url;
+            if (location.empty()) {
+                detail_url = "https://wttr.in?m";
+            } else {
+                detail_url = std::format("https://wttr.in/{}?m", escaped_url);
+            }
+            std::string escaped_detail;
+            for (char c : detail_url) {
+                if (c == '\'') escaped_detail += "'\\''";
+                else escaped_detail.push_back(c);
+            }
+            cmd = std::format("curl -sL --max-time 15 '{}' 2>/dev/null | head -50 || true", escaped_detail);
+            ShellResult r2 = run_shell(cmd, root, 20);
+
+            std::ostringstream ss;
+            if (!short_weather.empty()) ss << short_weather << "\n";
+            if (!r2.output.empty()) ss << r2.output;
+            if (ss.str().empty()) return "[error: could not fetch weather. Try specifying a city name.]";
+            return truncate(ss.str(), 5000);
+        }
+
+        // ── screenshot ───────────────────────────────────────────────
+        if (name == "screenshot") {
+            std::string output = get_str("output");
+            if (output.empty()) output = "screenshot.png";
+
+            fs::path out_path = resolve_under_root(root, output);
+            fs::create_directories(out_path.parent_path());
+
+            std::string cmd = std::format("termux-screencap '{}' 2>&1 || true", out_path.string());
+            ShellResult r = run_shell(cmd, root, 30);
+            std::error_code ec;
+            if (fs::exists(out_path, ec) && fs::file_size(out_path, ec) > 0) {
+                auto sz = fs::file_size(out_path, ec);
+                return std::format("[ok: screenshot saved to '{}' ({} bytes)]", output, sz);
+            }
+            return std::format("[error: screenshot failed]\n{}", r.output);
+        }
+
+        // ── plot_chart ───────────────────────────────────────────────
+        if (name == "plot_chart") {
+            std::string chart_type = get_str("chart_type");
+            std::string data_json = get_str("data_json");
+            std::string title = get_str("title");
+            std::string output = get_str("output");
+            if (chart_type.empty()) return "[tool error: 'chart_type' required (bar, line, pie, scatter)]";
+            if (data_json.empty()) return "[tool error: 'data_json' required]";
+            if (output.empty()) output = "chart.png";
+
+            fs::path out_path = resolve_under_root(root, output);
+            fs::create_directories(out_path.parent_path());
+
+            if (chart_type != "bar" && chart_type != "line" && chart_type != "pie" && chart_type != "scatter") {
+                return std::format("[error: invalid chart_type '{}'. Use: bar, line, pie, scatter]", chart_type);
+            }
+
+            std::string py_script = R"PY(
+import sys, json, os
+os.environ['MPLBACKEND'] = 'Agg'
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
+chart_type = sys.argv[1]
+data = json.loads(sys.argv[2])
+title = sys.argv[3] if len(sys.argv) > 3 else ''
+output = sys.argv[4] if len(sys.argv) > 4 else 'chart.png'
+
+fig, ax = plt.subplots(figsize=(10, 6))
+
+if chart_type == 'bar':
+    labels = data.get('labels', [])
+    values = data.get('values', [])
+    colors = data.get('colors', None)
+    ax.bar(labels, values, color=colors)
+    ax.set_xlabel(data.get('xlabel', ''))
+    ax.set_ylabel(data.get('ylabel', ''))
+
+elif chart_type == 'line':
+    labels = data.get('labels', [])
+    values = data.get('values', [])
+    ax.plot(labels, values, marker='o', linewidth=2)
+    ax.set_xlabel(data.get('xlabel', ''))
+    ax.set_ylabel(data.get('ylabel', ''))
+    ax.grid(True, alpha=0.3)
+
+elif chart_type == 'pie':
+    labels = data.get('labels', [])
+    values = data.get('values', [])
+    ax.pie(values, labels=labels, autopct='%1.1f%%', startangle=90)
+    ax.axis('equal')
+
+elif chart_type == 'scatter':
+    x = data.get('x', [])
+    y = data.get('y', [])
+    ax.scatter(x, y, alpha=0.6)
+    ax.set_xlabel(data.get('xlabel', ''))
+    ax.set_ylabel(data.get('ylabel', ''))
+    ax.grid(True, alpha=0.3)
+
+if title:
+    ax.set_title(title)
+
+plt.tight_layout()
+plt.savefig(output, dpi=150)
+print(f'OK: chart saved to {output}')
+)PY";
+
+            std::string pyfile = (fs::temp_directory_path() / "agent_plot.py").string();
+            { std::ofstream pf(pyfile); pf << py_script; }
+
+            std::string escaped_data;
+            for (char c : data_json) {
+                if (c == '\'') escaped_data += "'\\''";
+                else escaped_data.push_back(c);
+            }
+            std::string escaped_title;
+            for (char c : title) {
+                if (c == '\'') escaped_title += "'\\''";
+                else escaped_title.push_back(c);
+            }
+
+            std::string cmd = std::format("python3 '{}' '{}' '{}' '{}' '{}' 2>&1 || true",
+                                          pyfile, chart_type, escaped_data, escaped_title, out_path.string());
+            ShellResult r = run_shell(cmd, root, 60);
+            std::error_code ec;
+            if (fs::exists(out_path, ec) && fs::file_size(out_path, ec) > 0) {
+                auto sz = fs::file_size(out_path, ec);
+                return std::format("[ok: {} chart generated -> '{}' ({} bytes)]\n{}", chart_type, output, sz, r.output);
+            }
+            return std::format("[error: chart generation failed]\n{}", r.output);
         }
 
         return std::format("[tool error: unknown tool '{}']", name);

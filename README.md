@@ -24,7 +24,7 @@
 
 ### 🛠️ Agent 工具集（模型可调用的工具）
 
-Agent 模型可通过 Function Calling 机制调用以下 **23 个工具**，自主完成代码编写、文件操作、网络请求、数据解析等任务：
+Agent 模型可通过 Function Calling 机制调用以下 **38 个工具**，自主完成代码编写、文件操作、网络请求、数据解析等任务：
 
 | 工具 | 作用 |
 |------|------|
@@ -50,6 +50,21 @@ Agent 模型可通过 Function Calling 机制调用以下 **23 个工具**，自
 | `image_info` | 获取图片元数据（格式、尺寸、色彩模式） |
 | `image_convert` | 转换图片格式或调整尺寸（支持 PNG/JPEG/GIF/BMP/WebP） |
 | `image_to_svg` | 将位图嵌入为 base64 SVG（或使用 potrace 矢量化） |
+| `clipboard` | 读取/写入 Android 系统剪贴板 |
+| `notify` | 发送 Android 通知到通知栏 |
+| `speak` | 文字转语音（TTS），让手机开口说话 |
+| `vibrate` | 手机震动反馈 |
+| `run_python` | 执行 Python 代码片段并返回结果 |
+| `ocr` | 图片文字识别（OCR），基于 Tesseract 引擎 |
+| `qr_encode` | 生成二维码图片 |
+| `qr_decode` | 解码图片中的二维码/条形码 |
+| `diff_files` | 对比两个文件的差异（unified diff 格式） |
+| `compress` | 创建压缩归档（zip/tar.gz） |
+| `decompress` | 解压归档文件（zip/tar.gz/tar.bz2/tar.xz） |
+| `system_info` | 获取 Android 设备信息（电池/CPU/内存/存储/网络） |
+| `weather` | 查询天气和预报（基于 wttr.in） |
+| `screenshot` | 截取手机屏幕（结合 ocr 可分析屏幕内容） |
+| `plot_chart` | 根据数据生成图表（柱状图/折线图/饼图/散点图） |
 | `finish` | 标记任务完成并返回最终答复 |
 
 ### 🔒 路径沙箱保护
@@ -323,7 +338,7 @@ cpp_agent/
 
 ## 🧠 工作原理
 
-1. **系统提示词**：启动时根据工作区根目录生成系统提示，告知模型可用工具（共 23 个）与行为准则（先探索再修改、用 `write_file` 落地改动、用 `run_command` 验证构建/测试等）。
+1. **系统提示词**：启动时根据工作区根目录生成系统提示，告知模型可用工具（共 38 个）与行为准则（先探索再修改、用 `write_file` 落地改动、用 `run_command` 验证构建/测试等）。
 2. **Agent 循环**（`run_turn`）：
    - 将完整对话历史 + 工具 schema 发送给 LLM 的 `/chat/completions` 接口。
    - 若返回 `tool_calls`，逐个执行并把结果以 `tool` 角色消息回填到历史。
