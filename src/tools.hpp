@@ -140,7 +140,7 @@ inline json::Value tool_schemas() {
         return json::Value{std::move(t)};
     };
 
-    // 1. read_file
+    // 1. read_file - supports large files with offset/limit
     {
         json::Object p;
         p["type"] = json::Value{"object"};
@@ -148,10 +148,24 @@ inline json::Value tool_schemas() {
         json::Object path_p; path_p["type"] = json::Value{"string"};
         path_p["description"] = json::Value{"Path relative to workspace root (or absolute)."};
         props["path"] = json::Value{std::move(path_p)};
+        json::Object offset_p; offset_p["type"] = json::Value{"integer"};
+        offset_p["description"] = json::Value{"Byte offset to start reading from (0 = beginning). Useful for large files."};
+        offset_p["default"] = json::Value{0};
+        props["offset"] = json::Value{std::move(offset_p)};
+        json::Object limit_p; limit_p["type"] = json::Value{"integer"};
+        limit_p["description"] = json::Value{"Maximum number of bytes to read. Omit or set to 0 to read until end (capped at max_bytes)."};
+        limit_p["default"] = json::Value{0};
+        props["limit"] = json::Value{std::move(limit_p)};
+        json::Object maxb_p; maxb_p["type"] = json::Value{"integer"};
+        maxb_p["description"] = json::Value{"Maximum total bytes to return (default 200000). Increase for very large files."};
+        maxb_p["default"] = json::Value{200000};
+        props["max_bytes"] = json::Value{std::move(maxb_p)};
         p["properties"] = json::Value{std::move(props)};
         p["required"] = json::make_array<std::string>({"path"});
         tools.push_back(fn("read_file",
-            "Read the full contents of a text file from the workspace.",
+            "Read file contents with optional offset/limit for large files. "
+            "For small files just pass 'path'. For large files use offset and limit "
+            "to read in chunks, or increase max_bytes.",
             std::move(p)));
     }
 
@@ -333,6 +347,10 @@ inline json::Value tool_schemas() {
         regex_p["description"] = json::Value{"If true, treat pattern as a regex. Default false (literal string search)."};
         regex_p["default"] = json::Value{false};
         props["regex"] = json::Value{std::move(regex_p)};
+        json::Object maxb_p; maxb_p["type"] = json::Value{"integer"};
+        maxb_p["description"] = json::Value{"Max bytes of output (default 200000)."};
+        maxb_p["default"] = json::Value{200000};
+        props["max_bytes"] = json::Value{std::move(maxb_p)};
         p["properties"] = json::Value{std::move(props)};
         p["required"] = json::make_array<std::string>({"pattern"});
         tools.push_back(fn("search_text",
@@ -426,7 +444,7 @@ inline json::Value tool_schemas() {
 
 // ── Truncate helper ──────────────────────────────────────────────────
 
-inline std::string truncate(std::string s, size_t max_bytes = 60000) {
+inline std::string truncate(std::string s, size_t max_bytes = 200000) {
     if (s.size() <= max_bytes) return s;
     return s.substr(0, max_bytes) + std::format("\n...[truncated, {}/{} bytes shown]",
                                                max_bytes, s.size());
@@ -479,10 +497,42 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             std::error_code ec;
             if (!fs::exists(resolved, ec)) return std::format("[error: file not found: {}]", resolved.string());
             if (!fs::is_regular_file(resolved, ec)) return std::format("[error: not a regular file: {}]", resolved.string());
+
+            auto file_size = fs::file_size(resolved, ec);
+            size_t offset = static_cast<size_t>(std::max(0, get_int("offset", 0)));
+            size_t limit = static_cast<size_t>(std::max(0, get_int("limit", 0)));
+            size_t max_bytes = static_cast<size_t>(std::max(1024, get_int("max_bytes", 200000)));
+
+            // Clamp offset to file size
+            if (offset > static_cast<size_t>(file_size)) {
+                return std::format("[ok: offset {} is beyond file size {}, nothing to read]", offset, file_size);
+            }
+
+            // If limit is 0, read until end (capped by max_bytes)
+            size_t to_read = (limit == 0) ? (static_cast<size_t>(file_size) - offset) : limit;
+            to_read = std::min(to_read, max_bytes);
+
             std::ifstream f(resolved, std::ios::binary);
             if (!f) return std::format("[error: cannot open: {}]", resolved.string());
-            std::ostringstream ss; ss << f.rdbuf();
-            return truncate(ss.str());
+
+            f.seekg(static_cast<std::streamoff>(offset));
+            std::string buf(to_read, '\0');
+            f.read(buf.data(), static_cast<std::streamsize>(to_read));
+            size_t bytes_read = static_cast<size_t>(f.gcount());
+            buf.resize(bytes_read);
+
+            std::ostringstream ss;
+            ss << buf;
+            size_t remaining = static_cast<size_t>(file_size) - offset - bytes_read;
+
+            if (remaining > 0) {
+                ss << std::format("\n...[showing bytes {}-{} of {} ({} more available)]",
+                                  offset, offset + bytes_read - 1, file_size, remaining);
+            } else if (offset > 0) {
+                ss << std::format("\n[showing bytes {}-{} of {}]",
+                                  offset, offset + bytes_read - 1, file_size);
+            }
+            return ss.str();
         }
 
         // ── write_file ───────────────────────────────────────────────
@@ -647,6 +697,7 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             std::string pattern = get_str("pattern");
             std::string path = get_str("path");
             bool regex = get_bool("regex", false);
+            size_t max_bytes = static_cast<size_t>(std::max(1024, get_int("max_bytes", 200000)));
             if (pattern.empty()) return "[tool error: 'pattern' required]";
             if (path.empty()) path = ".";
 
@@ -662,7 +713,7 @@ inline std::string execute(const std::string& name, std::string_view arguments,
                                           grep_opts, escaped_pattern, resolved.string());
             ShellResult r = run_shell(cmd, root, 30);
             if (r.output.empty()) return std::format("[no matches found for '{}']", pattern);
-            return truncate(r.output);
+            return truncate(r.output, max_bytes);
         }
 
         // ── find_files ───────────────────────────────────────────────
@@ -726,7 +777,9 @@ inline std::string execute(const std::string& name, std::string_view arguments,
         if (name == "read_multiple_files") {
             auto paths = get_array("paths");
             if (paths.empty()) return "[tool error: 'paths' array required]";
+            size_t max_bytes_per_file = static_cast<size_t>(std::max(1024, get_int("max_bytes", 100000)));
             std::ostringstream ss;
+            
             for (size_t i = 0; i < paths.size(); ++i) {
                 if (!paths[i].is_string()) {
                     ss << std::format("[error: paths[{}] is not a string]\n", i);
@@ -740,20 +793,29 @@ inline std::string execute(const std::string& name, std::string_view arguments,
                         ss << std::format("===== {} (NOT FOUND) =====\n", p);
                         continue;
                     }
+                    auto fsize = fs::file_size(resolved, ec);
                     std::ifstream f(resolved, std::ios::binary);
                     if (!f) {
                         ss << std::format("===== {} (CANNOT OPEN) =====\n", p);
                         continue;
                     }
-                    std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-                    ss << std::format("===== {} ({}) =====\n", p, content.size());
-                    ss << content;
-                    if (!content.empty() && content.back() != '\n') ss << '\n';
+                    size_t to_read = std::min(static_cast<size_t>(fsize), max_bytes_per_file);
+                    std::string buf(to_read, '\0');
+                    f.read(buf.data(), static_cast<std::streamsize>(to_read));
+                    size_t bytes_read = static_cast<size_t>(f.gcount());
+                    buf.resize(bytes_read);
+
+                    ss << std::format("===== {} ({}/{}) =====\n", p, bytes_read, fsize);
+                    ss << buf;
+                    if (!buf.empty() && buf.back() != '\n') ss << '\n';
+                    if (static_cast<size_t>(fsize) > bytes_read) {
+                        ss << std::format("[... truncated, showing first {} of {} bytes]\n", bytes_read, fsize);
+                    }
                 } catch (const std::exception& e) {
                     ss << std::format("===== {} (ERROR: {}) =====\n", p, e.what());
                 }
             }
-            return truncate(ss.str());
+            return ss.str();
         }
 
         // ── write_multiple_files ─────────────────────────────────────
