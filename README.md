@@ -24,7 +24,7 @@
 
 ### 🛠️ Agent 工具集（模型可调用的工具）
 
-Agent 模型可通过 Function Calling 机制调用以下 **46 个工具**，自主完成代码编写、文件操作、网络请求、数据解析等任务：
+Agent 模型可通过 Function Calling 机制调用以下 **47 个工具**，自主完成代码编写、文件操作、网络请求、数据解析等任务：
 
 | 工具 | 作用 |
 |------|------|
@@ -67,6 +67,7 @@ Agent 模型可通过 Function Calling 机制调用以下 **46 个工具**，自
 | `screenshot` | 截取手机屏幕（结合 ocr 可分析屏幕内容） |
 | `plot_chart` | 根据数据生成图表（柱状图/折线图/饼图/散点图） |
 | `create_image` | 创建任意尺寸的空白图片（支持 RGB/RGBA/灰度模式） |
+| `create_video` | 将多张图片组合成视频（支持 mp4/webm/gif 等格式） |
 | `read_pixel` | 精确读取图片中某个像素的 RGBA 颜色值 |
 | `draw_pixel` | 精确设置图片中某个像素的颜色 |
 | `draw_rect` | 在图片上绘制矩形（支持填充和描边） |
@@ -148,6 +149,38 @@ print(f"计算结果: {result}")
 - 不传 `location` → 自动根据 IP 定位
 - `location="Beijing"` → 查询指定城市
 - `location="39.9,116.4"` → 查询坐标位置
+
+#### 🎬 视频创建工具
+
+| 工具 | 说明 |
+|------|------|
+| `create_video` | 将多张图片组合成视频，支持任意数量的图片 |
+
+**参数说明：**
+- `output` - 输出视频文件路径，扩展名决定格式（`.mp4`、`.webm`、`.avi`、`.gif` 等）
+- `images` - 图片路径数组，按顺序组合成视频
+- `fps` - 帧率（默认 24），控制播放速度
+- `loop` - 循环次数（默认 1），仅 GIF 有效，0 表示无限循环
+- `duration_per_image` - 每张图片显示时长（秒），设置后覆盖 fps
+
+**组合示例：创建图片序列并合成视频**
+```
+# 创建一系列图片
+create_image("frame001.png", width=320, height=240, color="red")
+draw_rect("frame001.png", x1=10, y1=10, x2=310, y2=230, outline="white")
+draw_text? → 可添加文字
+
+create_image("frame002.png", width=320, height=240, color="blue")
+...
+
+# 合成视频
+create_video("animation.mp4", 
+    images=["frame001.png", "frame002.png", "frame003.png", ...],
+    fps=30)
+  → [ok: created video 'animation.mp4' (10 images, 30 fps, 123456 bytes)]
+```
+
+> 💡 依赖 ffmpeg：`pkg install ffmpeg`
 
 #### 🎨 图片创建与像素级编辑工具
 
@@ -276,7 +309,7 @@ pkg install clang cmake libcurl git libandroid-spawn
 
 ### 2️⃣ Agent 工具依赖（按需安装）
 
-Agent 的 46 个工具中，部分需要额外安装软件才能使用。以下是完整清单：
+Agent 的 47 个工具中，部分需要额外安装软件才能使用。以下是完整清单：
 
 | 工具 | 所需安装 | 说明 |
 |------|----------|------|

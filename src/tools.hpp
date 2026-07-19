@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -14,6 +15,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <iomanip>
 #include <ranges>
 #include <spawn.h>
 #include <sstream>
@@ -980,7 +982,43 @@ inline json::Value tool_schemas() {
             std::move(p)));
     }
 
-    // ── 40. create_image - create a new blank image ──────────────────
+    // ── 40. create_video - combine images into a video ──────────────
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object output_p; output_p["type"] = json::Value{"string"};
+        output_p["description"] = json::Value{"Output video file path (e.g. 'video.mp4', 'video.webm', 'video.avi'). Extension determines format."};
+        props["output"] = json::Value{std::move(output_p)};
+        json::Object images_p; images_p["type"] = json::Value{"array"};
+        json::Object items_p; items_p["type"] = json::Value{"string"};
+        items_p["description"] = json::Value{"Path to an image file (relative to workspace)."};
+        images_p["items"] = json::Value{std::move(items_p)};
+        images_p["description"] = json::Value{"Array of image file paths to combine into video, in order."};
+        props["images"] = json::Value{std::move(images_p)};
+        json::Object fps_p; fps_p["type"] = json::Value{"integer"};
+        fps_p["description"] = json::Value{"Frames per second (default: 24). Controls playback speed."};
+        fps_p["default"] = json::Value{24};
+        props["fps"] = json::Value{std::move(fps_p)};
+        json::Object loop_p; loop_p["type"] = json::Value{"integer"};
+        loop_p["description"] = json::Value{"Number of times to loop the image sequence (default: 1). Use 0 for infinite loop (GIF only)."};
+        loop_p["default"] = json::Value{1};
+        props["loop"] = json::Value{std::move(loop_p)};
+        json::Object duration_p; duration_p["type"] = json::Value{"number"};
+        duration_p["description"] = json::Value{"Duration per image in seconds (alternative to fps). E.g. 0.5 = each image shows for 0.5s. Overrides fps if set."};
+        duration_p["default"] = json::Value{0};
+        props["duration_per_image"] = json::Value{std::move(duration_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"output", "images"});
+        tools.push_back(fn("create_video",
+            "Combine multiple images into a video file. Supports any number of images. "
+            "Output format is determined by file extension (.mp4, .webm, .avi, .gif, etc.). "
+            "All images should have the same dimensions for best results. "
+            "Uses ffmpeg internally (must be installed: pkg install ffmpeg).",
+            std::move(p)));
+    }
+
+    // ── 42. create_image - create a new blank image ──────────────────
     {
         json::Object p;
         p["type"] = json::Value{"object"};
@@ -2895,6 +2933,129 @@ except Exception as e:
             }
 
             return std::format("[tool error: unknown method '{}'. Use 'auto', 'termux-open', or 'ascii']", method);
+        }
+
+        // ── create_video - combine images into a video ───────────────
+        if (name == "create_video") {
+            std::string output = get_str("output");
+            auto images = get_array("images");
+            int fps = std::clamp(get_int("fps", 24), 1, 120);
+            int loop = std::max(0, get_int("loop", 1));
+            // loop: for GIF, 0 = infinite, otherwise number of repetitions
+            double duration_per_image = std::max(0.0, [&]() {
+                if (args.is_object() && args.contains("duration_per_image")) {
+                    const auto& v = args["duration_per_image"];
+                    if (v.is_number()) return v.as_number();
+                }
+                return 0.0;
+            }());
+
+            if (output.empty()) return "[tool error: 'output' required]";
+            if (images.empty()) return "[tool error: 'images' array required with at least one image]";
+
+            fs::path out_path = resolve_under_root(root, output);
+            fs::create_directories(out_path.parent_path());
+
+            // Resolve all image paths and check they exist
+            std::vector<std::string> resolved_images;
+            for (size_t i = 0; i < images.size(); ++i) {
+                if (!images[i].is_string()) {
+                    return std::format("[tool error: images[{}] is not a string]", i);
+                }
+                std::string img_path = images[i].as_string();
+                try {
+                    fs::path resolved = resolve_under_root(root, img_path);
+                    std::error_code ec;
+                    if (!fs::exists(resolved, ec)) {
+                        return std::format("[error: image not found: {}]", img_path);
+                    }
+                    resolved_images.push_back(resolved.string());
+                } catch (const std::exception& e) {
+                    return std::format("[error: '{}': {}]", img_path, e.what());
+                }
+            }
+
+            // Check if output is GIF
+            std::string ext = out_path.extension().string();
+            std::transform(ext.begin(), ext.end(), ext.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            bool is_gif = (ext == ".gif");
+
+            // Build ffmpeg command
+            // First, create a concat file for ffmpeg
+            std::string concat_file = (fs::temp_directory_path() / "agent_video_concat.txt").string();
+            {
+                std::ofstream cf(concat_file);
+                for (const auto& img : resolved_images) {
+                    cf << "file '" << img << "'\n";
+                    if (duration_per_image > 0) {
+                        cf << "duration " << std::fixed << std::setprecision(6) << duration_per_image << "\n";
+                    }
+                }
+            }
+
+            std::string escaped_concat;
+            for (char c : concat_file) { if (c == '\'') escaped_concat += "'\\''"; else escaped_concat.push_back(c); }
+            std::string escaped_output;
+            for (char c : out_path.string()) { if (c == '\'') escaped_output += "'\\''"; else escaped_output.push_back(c); }
+
+            std::string cmd;
+            if (is_gif) {
+                // For GIF: use palette for better quality
+                std::string palette_file = (fs::temp_directory_path() / "agent_video_palette.png").string();
+                std::string escaped_palette;
+                for (char c : palette_file) { if (c == '\'') escaped_palette += "'\\''"; else escaped_palette.push_back(c); }
+
+                std::string fps_str = std::format("{}", fps);
+                if (duration_per_image > 0) {
+                    fps_str = std::format("{}", 1.0 / duration_per_image);
+                }
+
+                // Generate palette
+                cmd = std::format(
+                    "ffmpeg -y -f concat -safe 0 -i '{}' -vf \"fps={},scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos,palettegen=stats_mode=diff\" '{}' 2>&1 && "
+                    "ffmpeg -y -f concat -safe 0 -i '{}' -i '{}' -lavfi \"fps={},scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5\" -loop {} '{}' 2>&1 || true",
+                    escaped_concat, fps_str, escaped_palette,
+                    escaped_concat, escaped_palette, fps_str, loop, escaped_output);
+            } else {
+                // For video: use libx264 or libx265
+                std::string fps_str = std::format("{}", fps);
+                if (duration_per_image > 0) {
+                    fps_str = std::format("{}", 1.0 / duration_per_image);
+                }
+
+                // Try to detect if input images have alpha channel - if so, use libvpx for WebM or libx264 with alpha
+                cmd = std::format(
+                    "ffmpeg -y -f concat -safe 0 -i '{}' "
+                    "-vf \"fps={},scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos,format=yuv420p\" "
+                    "-c:v libx264 -preset medium -crf 23 -pix_fmt yuv420p "
+                    "-movflags +faststart '{}' 2>&1 || true",
+                    escaped_concat, fps_str, escaped_output);
+            }
+
+            ShellResult r = run_shell(cmd, root, 300); // 5 min timeout for video encoding
+            std::error_code ec;
+            if (fs::exists(out_path, ec) && fs::file_size(out_path, ec) > 0) {
+                auto sz = fs::file_size(out_path, ec);
+                std::ostringstream ss;
+                ss << std::format("[ok: created video '{}' ({} images, {} fps, {} bytes)]\n",
+                                  output, resolved_images.size(), fps, sz);
+                if (!r.output.empty()) {
+                    // Show last few lines of ffmpeg output
+                    std::istringstream is(r.output);
+                    std::string line;
+                    std::vector<std::string> lines;
+                    while (std::getline(is, line)) {
+                        lines.push_back(line);
+                    }
+                    int start = std::max(0, static_cast<int>(lines.size()) - 5);
+                    for (int i = start; i < static_cast<int>(lines.size()); ++i) {
+                        ss << lines[i] << "\n";
+                    }
+                }
+                return ss.str();
+            }
+            return std::format("[error: video creation failed]\n{}", r.output);
         }
 
         // ── create_image - create a new blank image ──────────────────

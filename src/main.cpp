@@ -300,6 +300,7 @@ std::string build_system_prompt(const fs::path& root) {
         "  - screenshot(output?): capture device screen.\n"
         "  - plot_chart(chart_type, data_json, title?, output?): generate chart image.\n"
         "  - create_image(path, width, height, color?, mode?): create a new blank image with specified dimensions and optional background color.\n"
+        "  - create_video(output, images, fps?, loop?, duration_per_image?): combine multiple images into a video file.\n"
         "  - read_pixel(path, x, y): read the RGBA color value of a single pixel at (x, y).\n"
         "  - draw_pixel(path, x, y, color?): set a single pixel at (x, y) to the specified color.\n"
         "  - draw_rect(path, x1, y1, x2, y2, fill?, outline?, outline_width?): draw a rectangle with optional fill and outline.\n"
