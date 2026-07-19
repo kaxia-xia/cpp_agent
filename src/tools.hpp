@@ -980,7 +980,167 @@ inline json::Value tool_schemas() {
             std::move(p)));
     }
 
-    // ── 39. show_image - display an image file in Termux ──────────────
+    // ── 40. create_image - create a new blank image ──────────────────
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object path_p; path_p["type"] = json::Value{"string"};
+        path_p["description"] = json::Value{"Output image file path (e.g. 'image.png', 'image.jpg'). Extension determines format."};
+        props["path"] = json::Value{std::move(path_p)};
+        json::Object width_p; width_p["type"] = json::Value{"integer"};
+        width_p["description"] = json::Value{"Image width in pixels (1-10000)."};
+        props["width"] = json::Value{std::move(width_p)};
+        json::Object height_p; height_p["type"] = json::Value{"integer"};
+        height_p["description"] = json::Value{"Image height in pixels (1-10000)."};
+        props["height"] = json::Value{std::move(height_p)};
+        json::Object color_p; color_p["type"] = json::Value{"string"};
+        color_p["description"] = json::Value{"Background color. Can be: hex '#RRGGBB' or '#RRGGBBAA', named color like 'red', 'blue', 'white', 'black', or 'transparent'. Default: 'white'."};
+        color_p["default"] = json::Value{"white"};
+        props["color"] = json::Value{std::move(color_p)};
+        json::Object mode_p; mode_p["type"] = json::Value{"string"};
+        mode_p["description"] = json::Value{"Color mode: 'RGB' (24-bit), 'RGBA' (32-bit with alpha), 'L' (grayscale). Default: 'RGB'."};
+        mode_p["default"] = json::Value{"RGB"};
+        props["mode"] = json::Value{std::move(mode_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"path", "width", "height"});
+        tools.push_back(fn("create_image",
+            "Create a new blank image with the specified dimensions, color mode, and optional background color. "
+            "Supports any resolution from 1x1 up to 10000x10000. "
+            "Output format is determined by file extension (e.g. .png, .jpg, .bmp, .webp). "
+            "Uses Python PIL (Pillow) internally.",
+            std::move(p)));
+    }
+
+    // ── 41. read_pixel - read pixel color at (x, y) ──────────────────
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object path_p; path_p["type"] = json::Value{"string"};
+        path_p["description"] = json::Value{"Path to the image file."};
+        props["path"] = json::Value{std::move(path_p)};
+        json::Object x_p; x_p["type"] = json::Value{"integer"};
+        x_p["description"] = json::Value{"X coordinate (0-based, from left)."};
+        props["x"] = json::Value{std::move(x_p)};
+        json::Object y_p; y_p["type"] = json::Value{"integer"};
+        y_p["description"] = json::Value{"Y coordinate (0-based, from top)."};
+        props["y"] = json::Value{std::move(y_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"path", "x", "y"});
+        tools.push_back(fn("read_pixel",
+            "Read the RGBA color value of a single pixel at the specified (x, y) coordinates. "
+            "Returns the pixel color as RGBA tuple (0-255 each). "
+            "Uses Python PIL (Pillow) internally.",
+            std::move(p)));
+    }
+
+    // ── 42. draw_pixel - set pixel color at (x, y) ───────────────────
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object path_p; path_p["type"] = json::Value{"string"};
+        path_p["description"] = json::Value{"Path to the image file."};
+        props["path"] = json::Value{std::move(path_p)};
+        json::Object x_p; x_p["type"] = json::Value{"integer"};
+        x_p["description"] = json::Value{"X coordinate (0-based, from left)."};
+        props["x"] = json::Value{std::move(x_p)};
+        json::Object y_p; y_p["type"] = json::Value{"integer"};
+        y_p["description"] = json::Value{"Y coordinate (0-based, from top)."};
+        props["y"] = json::Value{std::move(y_p)};
+        json::Object color_p; color_p["type"] = json::Value{"string"};
+        color_p["description"] = json::Value{"Color value. Can be: hex '#RRGGBB' or '#RRGGBBAA', named color like 'red', 'blue', 'green', 'black', 'white', or 'transparent'. Default: 'black'."};
+        color_p["default"] = json::Value{"black"};
+        props["color"] = json::Value{std::move(color_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"path", "x", "y"});
+        tools.push_back(fn("draw_pixel",
+            "Set a single pixel at (x, y) to the specified color. "
+            "The image is modified in-place. "
+            "Uses Python PIL (Pillow) internally.",
+            std::move(p)));
+    }
+
+    // ── 43. draw_rect - draw a rectangle on an image ─────────────────
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object path_p; path_p["type"] = json::Value{"string"};
+        path_p["description"] = json::Value{"Path to the image file."};
+        props["path"] = json::Value{std::move(path_p)};
+        json::Object x1_p; x1_p["type"] = json::Value{"integer"};
+        x1_p["description"] = json::Value{"Top-left X coordinate."};
+        props["x1"] = json::Value{std::move(x1_p)};
+        json::Object y1_p; y1_p["type"] = json::Value{"integer"};
+        y1_p["description"] = json::Value{"Top-left Y coordinate."};
+        props["y1"] = json::Value{std::move(y1_p)};
+        json::Object x2_p; x2_p["type"] = json::Value{"integer"};
+        x2_p["description"] = json::Value{"Bottom-right X coordinate."};
+        props["x2"] = json::Value{std::move(x2_p)};
+        json::Object y2_p; y2_p["type"] = json::Value{"integer"};
+        y2_p["description"] = json::Value{"Bottom-right Y coordinate."};
+        props["y2"] = json::Value{std::move(y2_p)};
+        json::Object fill_p; fill_p["type"] = json::Value{"string"};
+        fill_p["description"] = json::Value{"Fill color (hex, named, or 'none' for transparent). Default: 'none'."};
+        fill_p["default"] = json::Value{"none"};
+        props["fill"] = json::Value{std::move(fill_p)};
+        json::Object outline_p; outline_p["type"] = json::Value{"string"};
+        outline_p["description"] = json::Value{"Outline color (hex, named, or 'none'). Default: 'black'."};
+        outline_p["default"] = json::Value{"black"};
+        props["outline"] = json::Value{std::move(outline_p)};
+        json::Object width_p; width_p["type"] = json::Value{"integer"};
+        width_p["description"] = json::Value{"Outline width in pixels (default: 1)."};
+        width_p["default"] = json::Value{1};
+        props["outline_width"] = json::Value{std::move(width_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"path", "x1", "y1", "x2", "y2"});
+        tools.push_back(fn("draw_rect",
+            "Draw a rectangle on an image, with optional fill color and outline. "
+            "The image is modified in-place. "
+            "Uses Python PIL (Pillow) internally.",
+            std::move(p)));
+    }
+
+    // ── 44. draw_line - draw a line on an image ──────────────────────
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object path_p; path_p["type"] = json::Value{"string"};
+        path_p["description"] = json::Value{"Path to the image file."};
+        props["path"] = json::Value{std::move(path_p)};
+        json::Object x1_p; x1_p["type"] = json::Value{"integer"};
+        x1_p["description"] = json::Value{"Start X coordinate."};
+        props["x1"] = json::Value{std::move(x1_p)};
+        json::Object y1_p; y1_p["type"] = json::Value{"integer"};
+        y1_p["description"] = json::Value{"Start Y coordinate."};
+        props["y1"] = json::Value{std::move(y1_p)};
+        json::Object x2_p; x2_p["type"] = json::Value{"integer"};
+        x2_p["description"] = json::Value{"End X coordinate."};
+        props["x2"] = json::Value{std::move(x2_p)};
+        json::Object y2_p; y2_p["type"] = json::Value{"integer"};
+        y2_p["description"] = json::Value{"End Y coordinate."};
+        props["y2"] = json::Value{std::move(y2_p)};
+        json::Object color_p; color_p["type"] = json::Value{"string"};
+        color_p["description"] = json::Value{"Line color (hex or named). Default: 'black'."};
+        color_p["default"] = json::Value{"black"};
+        props["color"] = json::Value{std::move(color_p)};
+        json::Object width_p; width_p["type"] = json::Value{"integer"};
+        width_p["description"] = json::Value{"Line width in pixels (default: 1)."};
+        width_p["default"] = json::Value{1};
+        props["line_width"] = json::Value{std::move(width_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({"path", "x1", "y1", "x2", "y2"});
+        tools.push_back(fn("draw_line",
+            "Draw a line on an image from (x1, y1) to (x2, y2) with specified color and width. "
+            "The image is modified in-place. "
+            "Uses Python PIL (Pillow) internally.",
+            std::move(p)));
+    }
+
+    // ── 45. show_image - display an image file in Termux ──────────────
     {
         json::Object p;
         p["type"] = json::Value{"object"};
@@ -2735,6 +2895,335 @@ except Exception as e:
             }
 
             return std::format("[tool error: unknown method '{}'. Use 'auto', 'termux-open', or 'ascii']", method);
+        }
+
+        // ── create_image - create a new blank image ──────────────────
+        if (name == "create_image") {
+            std::string path = get_str("path");
+            int width = get_int("width", 0);
+            int height = get_int("height", 0);
+            std::string color = get_str("color");
+            std::string mode = get_str("mode");
+            if (path.empty()) return "[tool error: 'path' required]";
+            if (width < 1 || width > 10000) return "[tool error: 'width' must be 1-10000]";
+            if (height < 1 || height > 10000) return "[tool error: 'height' must be 1-10000]";
+            if (color.empty()) color = "white";
+            if (mode.empty()) mode = "RGB";
+            if (mode != "RGB" && mode != "RGBA" && mode != "L") {
+                return "[tool error: 'mode' must be 'RGB', 'RGBA', or 'L']";
+            }
+
+            fs::path out_path = resolve_under_root(root, path);
+            fs::create_directories(out_path.parent_path());
+
+            std::string py_script = R"PY(
+import sys
+from PIL import Image
+
+out = sys.argv[1]
+w = int(sys.argv[2])
+h = int(sys.argv[3])
+color = sys.argv[4] if len(sys.argv) > 4 else 'white'
+mode = sys.argv[5] if len(sys.argv) > 5 else 'RGB'
+
+# Handle 'transparent' color for RGBA mode
+if color.lower() == 'transparent':
+    if mode == 'RGBA':
+        img = Image.new(mode, (w, h), (0, 0, 0, 0))
+    else:
+        # For non-RGBA, transparent becomes white
+        img = Image.new(mode, (w, h), 'white')
+else:
+    img = Image.new(mode, (w, h), color)
+
+img.save(out)
+print(f'OK: created {w}x{h} {mode} image -> {out}')
+)PY";
+
+            std::string pyfile = (fs::temp_directory_path() / "agent_create_image.py").string();
+            { std::ofstream pf(pyfile); pf << py_script; }
+
+            std::string escaped_path, escaped_color;
+            for (char c : out_path.string()) { if (c == '\'') escaped_path += "'\\''"; else escaped_path.push_back(c); }
+            for (char c : color) { if (c == '\'') escaped_color += "'\\''"; else escaped_color.push_back(c); }
+
+            std::string cmd = std::format("python3 '{}' '{}' {} {} '{}' '{}' 2>&1 || true",
+                                          pyfile, escaped_path, width, height, escaped_color, mode);
+            ShellResult r = run_shell(cmd, root, 30);
+            std::error_code ec;
+            if (fs::exists(out_path, ec) && fs::file_size(out_path, ec) > 0) {
+                auto sz = fs::file_size(out_path, ec);
+                return std::format("[ok: created image '{}' ({}x{}, {} mode, {} bytes)]\n{}",
+                                   path, width, height, mode, sz, r.output);
+            }
+            return std::format("[error: image creation failed]\n{}", r.output);
+        }
+
+        // ── read_pixel - read pixel color at (x, y) ──────────────────
+        if (name == "read_pixel") {
+            std::string path = get_str("path");
+            int x = get_int("x", -1);
+            int y = get_int("y", -1);
+            if (path.empty()) return "[tool error: 'path' required]";
+            if (x < 0) return "[tool error: 'x' must be >= 0]";
+            if (y < 0) return "[tool error: 'y' must be >= 0]";
+
+            fs::path resolved = resolve_under_root(root, path);
+            std::error_code ec;
+            if (!fs::exists(resolved, ec)) return std::format("[error: file not found: {}]", resolved.string());
+
+            std::string py_script = R"PY(
+import sys
+from PIL import Image
+
+img_path = sys.argv[1]
+x = int(sys.argv[2])
+y = int(sys.argv[3])
+
+img = Image.open(img_path)
+if x >= img.width or y >= img.height:
+    print(f'ERROR: coordinates ({x},{y}) out of bounds for image size {img.width}x{img.height}')
+    sys.exit(1)
+
+pixel = img.getpixel((x, y))
+mode = img.mode
+w, h = img.width, img.height
+
+# Convert to RGBA for consistent output
+if mode == 'L':
+    r, g, b, a = pixel, pixel, pixel, 255
+elif mode == 'LA':
+    r, g, b, a = pixel[0], pixel[0], pixel[0], pixel[1]
+elif mode == 'RGB':
+    r, g, b = pixel
+    a = 255
+elif mode == 'RGBA':
+    r, g, b, a = pixel
+elif mode == 'P':
+    # Palette mode - convert to RGB
+    img_rgb = img.convert('RGBA')
+    pixel = img_rgb.getpixel((x, y))
+    r, g, b, a = pixel
+else:
+    img_rgb = img.convert('RGBA')
+    pixel = img_rgb.getpixel((x, y))
+    r, g, b, a = pixel
+
+hex_color = f'#{r:02x}{g:02x}{b:02x}'
+if a < 255:
+    hex_color += f'{a:02x}'
+
+print(f'Pixel at ({x},{y}):')
+print(f'  Image: {w}x{h}, mode={mode}')
+print(f'  RGBA:  ({r}, {g}, {b}, {a})')
+print(f'  Hex:   {hex_color}')
+print(f'  Red:   {r}')
+print(f'  Green: {g}')
+print(f'  Blue:  {b}')
+print(f'  Alpha: {a}')
+)PY";
+
+            std::string pyfile = (fs::temp_directory_path() / "agent_read_pixel.py").string();
+            { std::ofstream pf(pyfile); pf << py_script; }
+
+            std::string escaped_path;
+            for (char c : resolved.string()) { if (c == '\'') escaped_path += "'\\''"; else escaped_path.push_back(c); }
+
+            std::string cmd = std::format("python3 '{}' '{}' {} {} 2>&1 || true",
+                                          pyfile, escaped_path, x, y);
+            ShellResult r = run_shell(cmd, root, 30);
+            if (r.exit_code != 0 || r.output.find("ERROR:") != std::string::npos) {
+                return std::format("[error: read_pixel failed]\n{}", r.output);
+            }
+            return r.output;
+        }
+
+        // ── draw_pixel - set pixel color at (x, y) ───────────────────
+        if (name == "draw_pixel") {
+            std::string path = get_str("path");
+            int x = get_int("x", -1);
+            int y = get_int("y", -1);
+            std::string color = get_str("color");
+            if (path.empty()) return "[tool error: 'path' required]";
+            if (x < 0) return "[tool error: 'x' must be >= 0]";
+            if (y < 0) return "[tool error: 'y' must be >= 0]";
+            if (color.empty()) color = "black";
+
+            fs::path resolved = resolve_under_root(root, path);
+            std::error_code ec;
+            if (!fs::exists(resolved, ec)) return std::format("[error: file not found: {}]", resolved.string());
+
+            std::string py_script = R"PY(
+import sys
+from PIL import Image
+
+img_path = sys.argv[1]
+x = int(sys.argv[2])
+y = int(sys.argv[3])
+color = sys.argv[4] if len(sys.argv) > 4 else 'black'
+
+img = Image.open(img_path)
+if x >= img.width or y >= img.height:
+    print(f'ERROR: coordinates ({x},{y}) out of bounds for image size {img.width}x{img.height}')
+    sys.exit(1)
+
+# Handle 'transparent' keyword
+if color.lower() == 'transparent':
+    if img.mode == 'RGBA':
+        img.putpixel((x, y), (0, 0, 0, 0))
+    else:
+        print(f'ERROR: cannot set transparent pixel on {img.mode} image. Convert to RGBA first.')
+        sys.exit(1)
+else:
+    img.putpixel((x, y), color)
+
+img.save(img_path)
+print(f'OK: set pixel at ({x},{y}) to {color}')
+)PY";
+
+            std::string pyfile = (fs::temp_directory_path() / "agent_draw_pixel.py").string();
+            { std::ofstream pf(pyfile); pf << py_script; }
+
+            std::string escaped_path, escaped_color;
+            for (char c : resolved.string()) { if (c == '\'') escaped_path += "'\\''"; else escaped_path.push_back(c); }
+            for (char c : color) { if (c == '\'') escaped_color += "'\\''"; else escaped_color.push_back(c); }
+
+            std::string cmd = std::format("python3 '{}' '{}' {} {} '{}' 2>&1 || true",
+                                          pyfile, escaped_path, x, y, escaped_color);
+            ShellResult r = run_shell(cmd, root, 30);
+            if (r.exit_code != 0 || r.output.find("ERROR:") != std::string::npos) {
+                return std::format("[error: draw_pixel failed]\n{}", r.output);
+            }
+            return r.output;
+        }
+
+        // ── draw_rect - draw a rectangle on an image ─────────────────
+        if (name == "draw_rect") {
+            std::string path = get_str("path");
+            int x1 = get_int("x1", -1);
+            int y1 = get_int("y1", -1);
+            int x2 = get_int("x2", -1);
+            int y2 = get_int("y2", -1);
+            std::string fill = get_str("fill");
+            std::string outline = get_str("outline");
+            int outline_width = std::max(1, get_int("outline_width", 1));
+            if (path.empty()) return "[tool error: 'path' required]";
+            if (x1 < 0 || y1 < 0 || x2 < 0 || y2 < 0) return "[tool error: coordinates must be >= 0]";
+            if (fill.empty()) fill = "none";
+            if (outline.empty()) outline = "black";
+
+            fs::path resolved = resolve_under_root(root, path);
+            std::error_code ec;
+            if (!fs::exists(resolved, ec)) return std::format("[error: file not found: {}]", resolved.string());
+
+            std::string py_script = R"PY(
+import sys
+from PIL import Image, ImageDraw
+
+img_path = sys.argv[1]
+x1, y1, x2, y2 = int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5])
+fill = sys.argv[6] if len(sys.argv) > 6 else 'none'
+outline = sys.argv[7] if len(sys.argv) > 7 else 'black'
+ow = int(sys.argv[8]) if len(sys.argv) > 8 else 1
+
+img = Image.open(img_path)
+draw = ImageDraw.Draw(img)
+
+# Normalize coordinates
+if x1 > x2: x1, x2 = x2, x1
+if y1 > y2: y1, y2 = y2, y1
+
+# Clamp to image bounds
+x1 = max(0, x1); y1 = max(0, y1)
+x2 = min(img.width - 1, x2); y2 = min(img.height - 1, y2)
+
+fill_color = None if fill.lower() == 'none' else fill
+outline_color = None if outline.lower() == 'none' else outline
+
+draw.rectangle([x1, y1, x2, y2], fill=fill_color, outline=outline_color, width=ow)
+img.save(img_path)
+
+w = x2 - x1 + 1
+h = y2 - y1 + 1
+print(f'OK: drew rectangle ({x1},{y1})-({x2},{y2}) [{w}x{h}px]')
+print(f'  fill={fill}, outline={outline}, width={ow}')
+)PY";
+
+            std::string pyfile = (fs::temp_directory_path() / "agent_draw_rect.py").string();
+            { std::ofstream pf(pyfile); pf << py_script; }
+
+            std::string escaped_path, escaped_fill, escaped_outline;
+            for (char c : resolved.string()) { if (c == '\'') escaped_path += "'\\''"; else escaped_path.push_back(c); }
+            for (char c : fill) { if (c == '\'') escaped_fill += "'\\''"; else escaped_fill.push_back(c); }
+            for (char c : outline) { if (c == '\'') escaped_outline += "'\\''"; else escaped_outline.push_back(c); }
+
+            std::string cmd = std::format("python3 '{}' '{}' {} {} {} {} '{}' '{}' {} 2>&1 || true",
+                                          pyfile, escaped_path, x1, y1, x2, y2,
+                                          escaped_fill, escaped_outline, outline_width);
+            ShellResult r = run_shell(cmd, root, 30);
+            if (r.exit_code != 0 || r.output.find("ERROR:") != std::string::npos) {
+                return std::format("[error: draw_rect failed]\n{}", r.output);
+            }
+            return r.output;
+        }
+
+        // ── draw_line - draw a line on an image ──────────────────────
+        if (name == "draw_line") {
+            std::string path = get_str("path");
+            int x1 = get_int("x1", -1);
+            int y1 = get_int("y1", -1);
+            int x2 = get_int("x2", -1);
+            int y2 = get_int("y2", -1);
+            std::string color = get_str("color");
+            int line_width = std::max(1, get_int("line_width", 1));
+            if (path.empty()) return "[tool error: 'path' required]";
+            if (x1 < 0 || y1 < 0 || x2 < 0 || y2 < 0) return "[tool error: coordinates must be >= 0]";
+            if (color.empty()) color = "black";
+
+            fs::path resolved = resolve_under_root(root, path);
+            std::error_code ec;
+            if (!fs::exists(resolved, ec)) return std::format("[error: file not found: {}]", resolved.string());
+
+            std::string py_script = R"PY(
+import sys
+from PIL import Image, ImageDraw
+
+img_path = sys.argv[1]
+x1, y1, x2, y2 = int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5])
+color = sys.argv[6] if len(sys.argv) > 6 else 'black'
+lw = int(sys.argv[7]) if len(sys.argv) > 7 else 1
+
+img = Image.open(img_path)
+draw = ImageDraw.Draw(img)
+
+# Clamp to image bounds
+x1 = max(0, min(x1, img.width - 1))
+y1 = max(0, min(y1, img.height - 1))
+x2 = max(0, min(x2, img.width - 1))
+y2 = max(0, min(y2, img.height - 1))
+
+draw.line([x1, y1, x2, y2], fill=color, width=lw)
+img.save(img_path)
+
+print(f'OK: drew line from ({x1},{y1}) to ({x2},{y2})')
+print(f'  color={color}, width={lw}')
+)PY";
+
+            std::string pyfile = (fs::temp_directory_path() / "agent_draw_line.py").string();
+            { std::ofstream pf(pyfile); pf << py_script; }
+
+            std::string escaped_path, escaped_color;
+            for (char c : resolved.string()) { if (c == '\'') escaped_path += "'\\''"; else escaped_path.push_back(c); }
+            for (char c : color) { if (c == '\'') escaped_color += "'\\''"; else escaped_color.push_back(c); }
+
+            std::string cmd = std::format("python3 '{}' '{}' {} {} {} {} '{}' {} 2>&1 || true",
+                                          pyfile, escaped_path, x1, y1, x2, y2,
+                                          escaped_color, line_width);
+            ShellResult r = run_shell(cmd, root, 30);
+            if (r.exit_code != 0 || r.output.find("ERROR:") != std::string::npos) {
+                return std::format("[error: draw_line failed]\n{}", r.output);
+            }
+            return r.output;
         }
 
         return std::format("[tool error: unknown tool '{}']", name);

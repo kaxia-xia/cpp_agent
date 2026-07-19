@@ -24,7 +24,7 @@
 
 ### 🛠️ Agent 工具集（模型可调用的工具）
 
-Agent 模型可通过 Function Calling 机制调用以下 **41 个工具**，自主完成代码编写、文件操作、网络请求、数据解析等任务：
+Agent 模型可通过 Function Calling 机制调用以下 **46 个工具**，自主完成代码编写、文件操作、网络请求、数据解析等任务：
 
 | 工具 | 作用 |
 |------|------|
@@ -66,6 +66,11 @@ Agent 模型可通过 Function Calling 机制调用以下 **41 个工具**，自
 | `get_datetime` | 获取当前日期和时间，支持自定义格式 |
 | `screenshot` | 截取手机屏幕（结合 ocr 可分析屏幕内容） |
 | `plot_chart` | 根据数据生成图表（柱状图/折线图/饼图/散点图） |
+| `create_image` | 创建任意尺寸的空白图片（支持 RGB/RGBA/灰度模式） |
+| `read_pixel` | 精确读取图片中某个像素的 RGBA 颜色值 |
+| `draw_pixel` | 精确设置图片中某个像素的颜色 |
+| `draw_rect` | 在图片上绘制矩形（支持填充和描边） |
+| `draw_line` | 在图片上绘制线段 |
 | `show_image` | 在 Termux 中显示图片（系统查看器或 ASCII 艺术） |
 | `finish` | 标记任务完成并返回最终答复 |
 
@@ -144,7 +149,34 @@ print(f"计算结果: {result}")
 - `location="Beijing"` → 查询指定城市
 - `location="39.9,116.4"` → 查询坐标位置
 
-#### 🎮 组合技示例
+#### 🎨 图片创建与像素级编辑工具
+
+新增 5 个图片工具，支持从零创建图片、精确读写像素、绘制基本图形：
+
+| 工具 | 说明 |
+|------|------|
+| `create_image` | 创建任意尺寸的空白图片（1x1 ~ 10000x10000），支持 RGB/RGBA/灰度模式，可指定背景色 |
+| `read_pixel` | 精确读取图片中某个像素的 RGBA 颜色值（返回十进制和十六进制） |
+| `draw_pixel` | 精确设置图片中某个像素的颜色（支持 hex、命名颜色、transparent） |
+| `draw_rect` | 在图片上绘制矩形（支持 fill 填充色、outline 描边色、outline_width 描边宽度） |
+| `draw_line` | 在图片上绘制线段（支持 color 颜色、line_width 线宽） |
+
+**组合示例：创建并编辑图片**
+```
+create_image("myart.png", width=200, height=100, color="#4488ff", mode="RGB")
+  → [ok: created image 'myart.png' (200x100, RGB mode, ...)]
+
+draw_rect("myart.png", x1=10, y1=10, x2=190, y2=90, fill="#ffcc00", outline="white", outline_width=3)
+  → [ok: drew rectangle (10,10)-(190,90) [181x81px]]
+
+draw_line("myart.png", x1=0, y1=0, x2=199, y2=99, color="red", line_width=2)
+  → [ok: drew line from (0,0) to (199,99)]
+
+read_pixel("myart.png", x=100, y=50)
+  → Pixel at (100,50): RGBA: (255, 204, 0, 255), Hex: #ffcc00
+```
+
+> 💡 这些工具依赖 Python Pillow 库：`pip install Pillow`
 
 ```
 screenshot → ocr → "屏幕上显示编译错误：..."
@@ -244,7 +276,7 @@ pkg install clang cmake libcurl git libandroid-spawn
 
 ### 2️⃣ Agent 工具依赖（按需安装）
 
-Agent 的 41 个工具中，部分需要额外安装软件才能使用。以下是完整清单：
+Agent 的 46 个工具中，部分需要额外安装软件才能使用。以下是完整清单：
 
 | 工具 | 所需安装 | 说明 |
 |------|----------|------|
