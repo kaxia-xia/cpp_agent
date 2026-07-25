@@ -10,9 +10,10 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 # Termux detection: the $PREFIX env var is set by Termux to the userland prefix
-# (typically /data/data/com.termux/files/usr). The toolchain also defines
-# __ANDROID__ / __BIONIC__, but $PREFIX is available at configure time and is
-# what pkg uses, so we use it for search-path setup.
+# (typically /data/data/com.termux/files/usr). On regular ARM64 Linux this is
+# not set, so the build falls through to standard find_package paths.
+# In both cases the toolchain may define __ANDROID__ / __BIONIC__, but $PREFIX
+# is available at configure time and is what pkg uses, so we use it here.
 if(DEFINED ENV{PREFIX} AND NOT CMAKE_PREFIX_PATH)
     set(CMAKE_PREFIX_PATH "$ENV{PREFIX}")
     list(APPEND CMAKE_LIBRARY_PATH "$ENV{PREFIX}/lib")

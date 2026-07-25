@@ -1,8 +1,8 @@
-# coding-agent — Android Termux 自主编程助手
+# coding-agent — 自主编程助手
 
-> **专为 Android Termux 环境打造的 AI 编程助手**，由 DeepSeek / 智谱 GLM 等大模型驱动，在终端中自主完成代码编写、重构、调试等任务。
+> **适用于 Android Termux 和 ARM64 Linux 的 AI 编程助手**，由 DeepSeek / 智谱 GLM 等大模型驱动，在终端中自主完成代码编写、重构、调试等任务。
 
-本项目是一个运行在 **Android Termux** 终端中的自主软件工程助手（autonomous coding agent）。它使用 C++20 编写，**零第三方运行时依赖**（仅需 libcurl），自带 JSON 解析器、HTTP 客户端和工具调度引擎，可在 Termux 中流畅运行。
+本项目是一个运行在终端中的自主软件工程助手（autonomous coding agent）。它使用 C++20 编写，**零第三方运行时依赖**（仅需 libcurl），自带 JSON 解析器、HTTP 客户端和工具调度引擎，可在 Termux 和普通 ARM64 Linux 上流畅运行。
 
 ---
 
@@ -10,7 +10,8 @@
 
 | 环境 | 说明 |
 |------|------|
-| **Android Termux** ✅ | 唯一支持的目标平台，已内置 Termux 前缀探测与 libc++ ABI 适配 |
+| **Android Termux** ✅ | 主要目标平台，已内置 Termux 前缀探测与 libc++ ABI 适配 |
+| **ARM64 Linux** ✅ | Ubuntu / Debian / Armbian 等普通 ARM64 发行版，零 Android 依赖 |
 
 ---
 
@@ -391,9 +392,7 @@ Agent 的 47 个工具中，部分需要额外安装软件才能使用。以下�
 > pip install Pillow qrcode pyzbar matplotlib
 > ```
 
----
-
-## 🚀 编译
+### 3️⃣ 编译
 
 ```bash
 # 在项目根目录执行
@@ -401,6 +400,70 @@ cmake -B build && cmake --build build
 ```
 
 编译产物为 `build/coding-agent`。
+
+> 💡 Termux 下 CMake 会自动探测 `$PREFIX` 并设置 Termux 特有的头文件/库搜索路径及 RPATH。
+
+---
+
+## 🔧 安装依赖（普通 ARM64 Linux）
+
+以下适用于 **Ubuntu 22.04+ / Debian 12+ / Armbian** 等普通 ARM64 Linux 发行版（非 Android）。
+
+### 1️⃣ 基础编译依赖
+
+```bash
+# Ubuntu / Debian
+sudo apt update
+sudo apt install cmake g++ libcurl4-openssl-dev git
+
+# 或使用 clang（二者选一即可）
+sudo apt install cmake clang libc++-dev libcurl4-openssl-dev git
+```
+
+> **编译器说明**：项目需要 **C++20** 支持。
+> - **GCC 11+**（Ubuntu 22.04 自带 GCC 11，满足要求）
+> - **Clang 14+**（需额外 `apt install clang`）
+>
+> CMake 会自动检测可用编译器。若使用 Clang，建议同时安装 `libc++-dev` 以获得 libc++ 运行时（CMake 会自动探测并启用，若不可用则回退到 libstdc++，不影响构建）。
+
+### 2️⃣ Agent 工具依赖（按需安装）
+
+与 Termux 类似，部分工具需要额外软件：
+
+| 工具 | Ubuntu/Debian 安装命令 | 说明 |
+|------|------------------------|------|
+| `ocr` | `sudo apt install tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim` | OCR 文字识别 |
+| `qr_encode` / `qr_decode` | `sudo apt install python3-pip && pip install qrcode pyzbar` | 二维码生成与解码 |
+| `plot_chart` | `sudo apt install python3-pip && pip install matplotlib` | 数据可视化图表 |
+| `render_mermaid` | 安装 Node.js 后 `npm install -g @mermaid-js/mermaid-cli` | Mermaid 图表渲染 |
+| `image_info` / `image_convert` / `image_to_svg` / `create_image` / `draw_*` 等图片工具 | `sudo apt install python3-pip && pip install Pillow` | 图片处理与创建 |
+| `create_video` | `sudo apt install ffmpeg` | 图片合成视频 |
+| `run_python` / `parse_html` / `parse_xml` / `parse_json` | `sudo apt install python3`（通常已预装） | Python 代码执行与数据解析 |
+| `weather` | 无需安装 | 基于 wttr.in 在线服务 |
+| `fetch_url` | 无需安装（已链接 libcurl） | 内置 HTTP 客户端 |
+| 文件操作类工具 | 无需安装 | 内置 C++ 实现 |
+| `diff_files` / `compress` / `decompress` | 无需安装（系统自带 diff、zip、tar） | 文件对比与压缩 |
+
+> ⚠️ **不可用的 Termux 专属工具**：`notify`、`clipboard`、`vibrate`、`screenshot`、`system_info`、`get_location` 这 6 个工具依赖 **Termux:API**，在普通 Linux 上不可用。调用时程序会返回错误提示（不会崩溃）。
+
+#### 🐍 Python 工具批量安装
+
+```bash
+# 一次性安装所有 Python 依赖
+sudo apt install python3 python3-pip
+pip install Pillow qrcode pyzbar matplotlib
+```
+
+### 3️⃣ 编译
+
+```bash
+# 在项目根目录执行（与 Termux 完全相同）
+cmake -B build && cmake --build build
+```
+
+编译产物为 `build/coding-agent`。
+
+> 💡 CMake 在非 Termux 环境下不会设置 `$PREFIX` 路径，构建系统会自动跳过 Termux 特有的 RPATH 配置，使用标准 Linux 库搜索路径。
 
 ---
 
