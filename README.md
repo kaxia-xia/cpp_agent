@@ -311,7 +311,7 @@ create_video("animation.gif",
 
 | 模型 | 说明 |
 |------|------|
-| `deepseek-chat` | DeepSeek 通用对话模型（默认） |
+| `deepseek-v4-pro` | DeepSeek 通用对话模型（默认） |
 
 - **Provider 名称**: `deepseek`
 - **API 地址**: `https://api.deepseek.com/v1`
@@ -467,7 +467,7 @@ ZHIPU_API_KEY="你的智谱API密钥" ./build/coding-agent --provider glm
 
 ```bash
 # 使用 DeepSeek（默认）
-./build/coding-agent --provider deepseek --model deepseek-chat
+./build/coding-agent --provider deepseek --model deepseek-v4-pro
 
 # 使用智谱 GLM
 ./build/coding-agent --provider glm --model glm-4-flash
@@ -491,7 +491,7 @@ coding-agent [OPTIONS] [--once "prompt"]
 
 OPTIONS
   -p, --provider <name>   deepseek | glm            (默认: deepseek)
-  -m, --model <name>      模型 id，如 deepseek-chat、glm-4.5
+  -m, --model <name>      模型 id，如 deepseek-v4-pro、glm-4.5
       --api-key <key>     API key（否则读取环境变量）
   -r, --root <dir>        工作区根目录              (默认: 当前目录)
   -t, --temperature <f>   0.0 - 2.0                 (默认: 0.3)
