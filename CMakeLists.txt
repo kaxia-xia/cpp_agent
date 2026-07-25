@@ -9,23 +9,30 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# Termux detection: the $PREFIX env var is set by Termux to the userland prefix
-# (typically /data/data/com.termux/files/usr). On regular ARM64 Linux this is
-# not set, so the build falls through to standard find_package paths.
-# In both cases the toolchain may define __ANDROID__ / __BIONIC__, but $PREFIX
-# is available at configure time and is what pkg uses, so we use it here.
-if(DEFINED ENV{PREFIX} AND NOT CMAKE_PREFIX_PATH)
-    set(CMAKE_PREFIX_PATH "$ENV{PREFIX}")
-    list(APPEND CMAKE_LIBRARY_PATH "$ENV{PREFIX}/lib")
-    list(APPEND CMAKE_INCLUDE_PATH "$ENV{PREFIX}/include")
-    message(STATUS "Termux prefix detected: $ENV{PREFIX}")
+# ── Platform detection ──────────────────────────────────────────────
+# Termux runs on Android with Bionic libc, which defines __ANDROID__.
+# Regular ARM64 Linux uses glibc/musl and does NOT define __ANDROID__.
+# This compile-time probe is more robust than checking $PREFIX.
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles("#ifndef __ANDROID__\n#error not android\n#endif\nint main(){return 0;}" IS_ANDROID)
+if(IS_ANDROID)
+    message(STATUS "Android/Termux platform detected (__ANDROID__)")
     set(TERMUX_BUILD ON)
+
+    # On Termux, pkg installs everything under $PREFIX.
+    if(DEFINED ENV{PREFIX})
+        set(CMAKE_PREFIX_PATH "$ENV{PREFIX}")
+        list(APPEND CMAKE_LIBRARY_PATH "$ENV{PREFIX}/lib")
+        list(APPEND CMAKE_INCLUDE_PATH "$ENV{PREFIX}/include")
+        message(STATUS "Termux prefix: $ENV{PREFIX}")
+    endif()
+else()
+    message(STATUS "Generic Linux platform detected (no __ANDROID__)")
 endif()
 
 # On Termux, clang++ defaults to libc++; on desktop clang it usually defaults to
 # libstdc++. Probe libc++ once and prefer it if usable so the build matches the
 # Termux ABI regardless of host.
-include(CheckCXXSourceCompiles)
 set(CMAKE_REQUIRED_FLAGS "-stdlib=libc++")
 check_cxx_source_compiles("#include <string>\nint main(){return 0;}" HAVE_LIBCXX_STDLIB)
 unset(CMAKE_REQUIRED_FLAGS)
