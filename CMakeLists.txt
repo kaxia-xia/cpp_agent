@@ -68,13 +68,20 @@ endif()
 # ── System prompt file ──────────────────────────────────────────────
 # Copy the platform-appropriate system prompt to the build directory.
 # The executable reads system_prompt.txt from its own directory at runtime.
+# Uses add_custom_command(OUTPUT ...) instead of POST_BUILD so CMake
+# tracks the source file as a dependency — editing the prompt will
+# trigger a copy even when the main binary doesn't need recompiling.
 if(TERMUX_BUILD)
     set(PROMPT_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/system_prompt_termux.txt")
 else()
     set(PROMPT_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/system_prompt_linux.txt")
 endif()
 set(PROMPT_DEST "${CMAKE_CURRENT_BINARY_DIR}/system_prompt.txt")
-add_custom_command(TARGET coding-agent POST_BUILD
+add_custom_command(
+    OUTPUT  "${PROMPT_DEST}"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${PROMPT_SOURCE}" "${PROMPT_DEST}"
+    DEPENDS "${PROMPT_SOURCE}"
     COMMENT "Copying system_prompt.txt (TERMUX_BUILD=${TERMUX_BUILD})"
 )
+add_custom_target(copy_prompt DEPENDS "${PROMPT_DEST}")
+add_dependencies(coding-agent copy_prompt)
