@@ -20,10 +20,13 @@
 #include <cstdlib>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <set>
 #include <signal.h>
+#include <sstream>
+#include <stdexcept>
 #include <termios.h>
 #include <string>
 #include <string_view>
@@ -90,7 +93,7 @@ USAGE
 
 OPTIONS
   -p, --provider <name>   deepseek | glm            (default: deepseek)
-  -m, --model <name>       model id, e.g. deepseek-chat, glm-4.5
+  -m, --model <name>       model id, e.g. deepseek-v4-pro, glm-4.5
       --api-key <key>      API key (else read from env, see below)
   -r, --root <dir>         workspace root            (default: cwd)
   -t, --temperature <f>    0.0 - 2.0                 (default: 0.3)
@@ -254,72 +257,42 @@ std::string resolve_api_key(const Config& cfg, const llm::Provider& p) {
     return {};
 }
 
+// Resolve the directory containing the running executable.
+// Uses /proc/self/exe on Linux; falls back to argv[0] otherwise.
+fs::path exe_dir() {
+    std::error_code ec;
+    fs::path exe = fs::read_symlink("/proc/self/exe", ec);
+    if (!ec) return exe.parent_path();
+    // Fallback: not ideal when launched via PATH, but better than nothing.
+    return fs::current_path();
+}
+
+// Read the system prompt from system_prompt.txt (located next to the
+// executable binary) and substitute the workspace root.
 std::string build_system_prompt(const fs::path& root) {
-    return std::format(
-        "当前环境为android termux，基于这一点处理接下来的对话。\n\n"
-        "You are coding-agent, an autonomous software-engineering assistant running in a Linux "
-        "terminal (Android Termux). Your job is to help the user write, understand, refactor, and debug code.\n\n"
-        "WORKSPACE\n  root: {}\n  os:   Android (Termux)\n\n"
-        "TOOLS available (call via function/tool calling):\n"
-        "  - read_file(path, offset?, limit?, max_bytes?, start_line?, end_line?): read file with optional byte offset/limit for large files, or line-based reading with start_line/end_line (1-based).\n"
-        "  - write_file(path, content): create/overwrite a file; parent dirs auto-created.\n"
-        "  - list_dir(path?): list directory entries.\n"
-        "  - run_command(command, timeout?): run a shell command.\n"
-        "  - edit_file(path, old_text?, new_text, line?): replace first occurrence of old_text with new_text, or replace an entire line by number (1-based) with new_text.\n"
-        "  - delete_file(path): delete a file or empty directory.\n"
-        "  - rename_file(source, destination): rename/move a file or directory.\n"
-        "  - copy_file(source, destination): copy a file or directory.\n"
-        "  - append_file(path, content): append content to end of file.\n"
-        "  - search_text(pattern, path?, regex?, max_bytes?): grep for pattern in files.\n"
-        "  - find_files(pattern, path?): find files matching a glob pattern.\n"
-        "  - file_info(path): get file/directory metadata.\n"
-        "  - read_multiple_files(paths, max_bytes?, start_line?, end_line?): read multiple files at once, with optional line-based reading.\n"
-        "  - write_multiple_files(files): write multiple files at once.\n"
-        "  - fetch_url(url, timeout?, max_bytes?): HTTP GET a URL and return the body.\n"
-        "  - parse_html(html, query?): parse HTML, extract text/links/CSS-selector matches.\n"
-        "  - parse_xml(xml, xpath?): parse XML, extract text/structure/XPath matches.\n"
-        "  - parse_json(json, query?): parse and query JSON with dot-separated paths.\n"
-        "  - render_mermaid(mermaid, output): convert Mermaid diagram to SVG file.\n"
-        "  - image_info(path): get image metadata (format, dimensions, mode).\n"
-        "  - image_convert(source, destination, width?, height?, quality?): convert/resize images.\n"
-        "  - image_to_svg(source, destination): embed bitmap image as base64 in SVG.\n"
-        "  - clipboard(action, content?): read/write Android system clipboard.\n"
-        "  - notify(title, content, priority?, alert_once?, sound?): send Android notification (use sound=true to play a sound).\n"
-        "  - vibrate(duration_ms?): vibrate the device.\n"
-        "  - run_python(code, timeout?): execute Python code snippet.\n"
-        "  - ocr(image_path, lang?): OCR text from image using Tesseract.\n"
-        "  - qr_encode(data, output): generate QR code image.\n"
-        "  - qr_decode(image_path): decode QR/barcode from image.\n"
-        "  - diff_files(file1, file2, context_lines?): compare two files.\n"
-        "  - compress(source, output, format?): create zip/tar.gz archive.\n"
-        "  - decompress(archive, output_dir?): extract archive.\n"
-        "  - system_info(category?): get device info (battery/cpu/memory/storage/network).\n"
-        "  - weather(location?): query weather forecast.\n"
-        "  - get_location(provider?): get current geographic location (lat/lon) via GPS or network.\n"
-        "  - get_datetime(format?): get current date and time in specified format.\n"
-        "  - screenshot(output?): capture device screen.\n"
-        "  - plot_chart(chart_type, data_json, title?, output?): generate chart image.\n"
-        "  - create_image(path, width, height, color?, mode?): create a new blank image with specified dimensions and optional background color.\n"
-        "  - create_video(output, images, fps?, loop?, duration_per_image?): combine multiple images into a video file.\n"
-        "  - read_pixel(path, x, y): read the RGBA color value of a single pixel at (x, y).\n"
-        "  - draw_pixel(path, x, y, color?): set a single pixel at (x, y) to the specified color.\n"
-        "  - draw_rect(path, x1, y1, x2, y2, fill?, outline?, outline_width?): draw a rectangle with optional fill and outline.\n"
-        "  - draw_line(path, x1, y1, x2, y2, color?, line_width?): draw a line between two points.\n"
-        "  - show_image(path, method?, ascii_width?): display an image file in Termux (system viewer or ASCII art).\n"
-        "  - finish(summary): return the final answer and end the task. Call exactly once when done.\n\n"
-        "GUIDELINES\n"
-        "  1. Use tools whenever possible: always prefer calling agent tools (read_file, write_file, run_command, etc.) over just describing what you would do. The tools are your primary way to interact with the environment.\n"
-        "  2. Explore first: list_dir/read_file before making changes so you understand the codebase.\n"
-        "  3. Make real changes with write_file; do not just paste diffs at the user.\n"
-        "  4. Verify: run_command builds/tests to confirm your changes work; fix what breaks.\n"
-        "  5. Keep tool outputs concise. Prefer a few focused reads over dumping huge files.\n"
-        "  6. Paths are sandboxed to the workspace root; relative paths are preferred.\n"
-        "  7. When the task is complete, call finish with a short summary of what you did.\n"
-        "  8. If a tool errors, read the message and adapt — do not repeat the identical call.\n"
-        "  9. Never invent file contents; read first when you need accuracy.\n"
-        "  10. 每轮对话结束后（即调用 finish 之前），都必须调用 notify 工具向通知栏发送一条通知，"
-        "告知用户本轮任务已完成。标题用 \"coding-agent\"，内容简要描述本轮完成的工作。\n",
-        fs::weakly_canonical(root).string());
+    fs::path prompt_path = exe_dir() / "system_prompt.txt";
+
+    std::ifstream file(prompt_path);
+    if (!file.is_open()) {
+        throw std::runtime_error(std::format(
+            "cannot open system prompt file: {}\n"
+            "make sure system_prompt.txt is in the same directory as the binary",
+            prompt_path.string()));
+    }
+
+    std::ostringstream oss;
+    oss << file.rdbuf();
+    std::string content = oss.str();
+
+    // Substitute {root} placeholder.
+    std::string root_str = fs::weakly_canonical(root).string();
+    std::string placeholder = "{root}";
+    for (size_t pos = 0; (pos = content.find(placeholder, pos)) != std::string::npos;
+         pos += root_str.size()) {
+        content.replace(pos, placeholder.size(), root_str);
+    }
+
+    return content;
 }
 
 // Derive a short label for an auto-snapshot from the user's prompt.
@@ -461,7 +434,12 @@ TurnOutcome run_turn(http::Client& http, const llm::Provider& provider,
             print_tool_call(tc.function_name, tc.arguments);
             std::string result = tools::execute(tc.function_name, tc.arguments, cfg.root);
             print_tool_result(result);
-            messages.push_back(llm::Message::tool_result(tc.id, tc.function_name, result));
+            // Truncate tool results before feeding them back to the LLM
+            // so that a huge read_file / run_command output does not
+            // blow up the context window.
+            messages.push_back(llm::Message::tool_result(
+                tc.id, tc.function_name,
+                tools::truncate(result, 60000)));
 
             if (tc.function_name == "finish") {
                 out.final_text = result;
