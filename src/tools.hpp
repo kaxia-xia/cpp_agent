@@ -1227,7 +1227,19 @@ inline std::string execute(const std::string& name, std::string_view arguments,
     if (!arguments.empty()) {
         try { args = json::parse(arguments); }
         catch (const std::exception& e) {
-            return std::format("[tool error: invalid arguments JSON: {}]", e.what());
+            // If the arguments are very long they were probably truncated
+            // by the model output limit (common with write_file / append_file
+            // when the model tries to inline a huge file in the JSON).
+            std::string hint;
+            if (arguments.size() > 10000) {
+                hint = std::format(
+                    "  (arguments are {} bytes — likely truncated by the model "
+                    "output limit.  For large file contents use run_command "
+                    "with a heredoc instead of write_file.)",
+                    arguments.size());
+            }
+            return std::format("[tool error: invalid arguments JSON: {}]{}",
+                               e.what(), hint);
         }
     }
 
@@ -1362,6 +1374,29 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             std::string path = get_str("path");
             std::string content = get_str("content");
             if (path.empty()) return "[tool error: 'path' required]";
+
+            // If the content is empty, the LLM's output was likely
+            // truncated by token limits.  Fail with a clear message
+            // so the agent knows what to do instead of looping.
+            if (content.empty()) {
+                return std::format(
+                    "[error: 'content' is empty — the file content was probably "
+                    "too large and got truncated by the model output limit.  "
+                    "Use run_command with a heredoc to write the file instead, "
+                    "or split the file into smaller pieces with multiple write_file calls.]");
+            }
+
+            // Cap write_file content at 500 KB.  Larger files should be
+            // created via run_command (e.g. cat <<'EOF' > file).
+            constexpr size_t kMaxWriteBytes = 500 * 1024;
+            if (content.size() > kMaxWriteBytes) {
+                return std::format(
+                    "[error: write_file content is {} bytes but the limit is {} "
+                    "bytes ({} KB).  Use run_command to write such a large file, "
+                    "e.g.:  run_command(\"cat <<'HEREDOC_END' > {}\")]",
+                    content.size(), kMaxWriteBytes, kMaxWriteBytes / 1024, path);
+            }
+
             fs::path resolved = resolve_under_root(root, path);
             fs::create_directories(resolved.parent_path());
             std::ofstream f(resolved, std::ios::binary | std::ios::trunc);
@@ -1537,6 +1572,23 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             std::string path = get_str("path");
             std::string content = get_str("content");
             if (path.empty()) return "[tool error: 'path' required]";
+
+            if (content.empty()) {
+                return std::format(
+                    "[error: 'content' is empty — the content was probably "
+                    "too large and got truncated by the model output limit.  "
+                    "Use run_command to append instead.]");
+            }
+
+            constexpr size_t kMaxAppendBytes = 500 * 1024;
+            if (content.size() > kMaxAppendBytes) {
+                return std::format(
+                    "[error: append_file content is {} bytes but the limit is {} "
+                    "bytes ({} KB).  Use run_command to append to this file, "
+                    "e.g.:  run_command(\"cat <<'HEREDOC_END' >> {}\")]",
+                    content.size(), kMaxAppendBytes, kMaxAppendBytes / 1024, path);
+            }
+
             fs::path resolved = resolve_under_root(root, path);
             fs::create_directories(resolved.parent_path());
             std::ofstream f(resolved, std::ios::binary | std::ios::app);
