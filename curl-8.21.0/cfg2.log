@@ -1,0 +1,639 @@
+checking whether to enable maintainer-specific portions of Makefiles... no
+checking whether make supports nested variables... yes
+checking whether to enable debug build options... no
+checking whether to enable compiler optimizer... (assumed) yes
+checking whether to enable strict compiler warnings... no
+checking whether to enable compiler warnings as errors... no
+checking whether to enable hiding of library internal symbols... yes
+checking whether to enable c-ares for DNS lookups... no
+checking whether to disable dependency on -lrt... (assumed no)
+checking whether to enable HTTPSRR support... no
+checking whether to enable ECH support... no
+checking whether to enable SSL session export support... no
+checking whether to enable HTTP/3 proxy support... no
+checking for path separator... :
+checking for sed... /data/data/com.termux/files/usr/bin/sed
+checking for grep... /data/data/com.termux/files/usr/bin/grep
+checking that grep -E works... yes
+checking for aarch64-linux-musl-ar... no
+checking for ar... /data/data/com.termux/files/usr/bin/ar
+configure: using CFLAGS: -O2 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0
+configure: CFLAGS note: CFLAGS should only be used to specify C compiler flags, not macro suppressions. Use CPPFLAGS for: -U_FORTIFY_SOURCE
+configure: CFLAGS note: CFLAGS should only be used to specify C compiler flags, not macro definitions. Use CPPFLAGS for: -D_FORTIFY_SOURCE=0
+configure: WARNING: Continuing even with errors mentioned immediately above this line.
+checking for a BSD-compatible install... /data/data/com.termux/files/usr/bin/install -c
+checking for aarch64-linux-musl-gcc... clang --target=aarch64-linux-musl --sysroot=/data/data/com.termux/files/home/code/cpp_agent/musl-sysroot
+checking whether the C compiler works... yes
+checking for C compiler default output file name... a.out
+checking for suffix of executables... 
+checking whether we are cross compiling... no
+checking for suffix of object files... o
+checking whether the compiler supports GNU C... yes
+checking whether clang --target=aarch64-linux-musl --sysroot=/data/data/com.termux/files/home/code/cpp_agent/musl-sysroot accepts -g... yes
+checking for clang --target=aarch64-linux-musl --sysroot=/data/data/com.termux/files/home/code/cpp_agent/musl-sysroot option to enable C11 features... none needed
+checking whether clang --target=aarch64-linux-musl --sysroot=/data/data/com.termux/files/home/code/cpp_agent/musl-sysroot understands -c and -o together... yes
+checking how to run the C preprocessor... clang --target=aarch64-linux-musl --sysroot=/data/data/com.termux/files/home/code/cpp_agent/musl-sysroot -E
+checking for stdio.h... yes
+checking for stdlib.h... yes
+checking for string.h... yes
+checking for inttypes.h... yes
+checking for stdint.h... yes
+checking for strings.h... yes
+checking for sys/stat.h... yes
+checking for sys/types.h... yes
+checking for unistd.h... yes
+checking for stdatomic.h... yes
+checking if _Atomic is available... yes
+checking whether build environment is sane... yes
+checking for a race-free mkdir -p... /data/data/com.termux/files/usr/bin/mkdir -p
+checking for gawk... gawk
+checking whether make sets $(MAKE)... yes
+checking whether make supports the include directive... yes (GNU style)
+checking dependency style of clang --target=aarch64-linux-musl --sysroot=/data/data/com.termux/files/home/code/cpp_agent/musl-sysroot... gcc3
+checking curl version... 8.21.0
+checking for perl... no
+checking for httpd... no
+checking for apache2... no
+checking for apxs... no
+configure: httpd/apache2 not in PATH, http tests disabled
+configure: apxs not in PATH, http tests disabled
+checking for danted... no
+checking for danted... no
+checking for sshd... /data/data/com.termux/files/usr/bin/sshd
+checking for sftp-server... no
+checking for sftp-server... no
+checking for nghttpx... no
+checking for caddy... no
+checking build system type... aarch64-unknown-linux-musl
+checking host system type... aarch64-unknown-linux-musl
+checking for grep that handles long lines and -e... (cached) /data/data/com.termux/files/usr/bin/grep
+checking for egrep... /data/data/com.termux/files/usr/bin/grep -E
+checking if OS is AIX (to define _ALL_SOURCE)... no
+checking if _THREAD_SAFE is already defined... no
+checking if _THREAD_SAFE is actually needed... no
+checking if _THREAD_SAFE is onwards defined... no
+checking if _REENTRANT is already defined... no
+checking if _REENTRANT is actually needed... no
+checking if _REENTRANT is onwards defined... no
+checking for special C compiler options needed for large files... no
+checking for _FILE_OFFSET_BITS value needed for large files... no
+checking how to print strings... printf
+checking for a sed that does not truncate output... (cached) /data/data/com.termux/files/usr/bin/sed
+checking for fgrep... /data/data/com.termux/files/usr/bin/grep -F
+checking for ld used by clang --target=aarch64-linux-musl --sysroot=/data/data/com.termux/files/home/code/cpp_agent/musl-sysroot... /data/data/com.termux/files/usr/bin/ld
+checking if the linker (/data/data/com.termux/files/usr/bin/ld) is GNU ld... yes
+checking for BSD- or MS-compatible name lister (nm)... /data/data/com.termux/files/usr/bin/nm -B
+checking the name lister (/data/data/com.termux/files/usr/bin/nm -B) interface... BSD nm
+checking whether ln -s works... yes
+checking the maximum length of command line arguments... 32768
+checking how to convert aarch64-unknown-linux-musl file names to aarch64-unknown-linux-musl format... func_convert_file_noop
+checking how to convert aarch64-unknown-linux-musl file names to toolchain format... func_convert_file_noop
+checking for /data/data/com.termux/files/usr/bin/ld option to reload object files... -r
+checking for aarch64-linux-musl-file... no
+checking for file... no
+checking for aarch64-linux-musl-objdump... no
+checking for objdump... objdump
+checking how to recognize dependent libraries... pass_all
+checking for aarch64-linux-musl-dlltool... no
+checking for dlltool... dlltool
+checking how to associate runtime and link libraries... printf %s\n
+checking for aarch64-linux-musl-ar... /data/data/com.termux/files/usr/bin/ar
+checking for archiver @FILE support... @
+checking for aarch64-linux-musl-strip... no
+checking for strip... strip
+checking for aarch64-linux-musl-ranlib... no
+checking for ranlib... ranlib
+checking command to parse /data/data/com.termux/files/usr/bin/nm -B output from clang --target=aarch64-linux-musl --sysroot=/data/data/com.termux/files/home/code/cpp_agent/musl-sysroot object... ok
+checking for sysroot... no
+checking for a working dd... /data/data/com.termux/files/usr/bin/dd
+checking how to truncate binary pipes... /data/data/com.termux/files/usr/bin/dd bs=4096 count=1
+checking for aarch64-linux-musl-mt... no
+checking for mt... no
+checking if : is a manifest tool... no
+checking for dlfcn.h... yes
+checking for objdir... .libs
+checking if clang --target=aarch64-linux-musl --sysroot=/data/data/com.termux/files/home/code/cpp_agent/musl-sysroot supports -fno-rtti -fno-exceptions... yes
+checking for clang --target=aarch64-linux-musl --sysroot=/data/data/com.termux/files/home/code/cpp_agent/musl-sysroot option to produce PIC... -fPIC -DPIC
+checking if clang --target=aarch64-linux-musl --sysroot=/data/data/com.termux/files/home/code/cpp_agent/musl-sysroot PIC flag -fPIC -DPIC works... yes
+checking if clang --target=aarch64-linux-musl --sysroot=/data/data/com.termux/files/home/code/cpp_agent/musl-sysroot static flag -static works... yes
+checking if clang --target=aarch64-linux-musl --sysroot=/data/data/com.termux/files/home/code/cpp_agent/musl-sysroot supports -c -o file.o... yes
+checking if clang --target=aarch64-linux-musl --sysroot=/data/data/com.termux/files/home/code/cpp_agent/musl-sysroot supports -c -o file.o... (cached) yes
+checking whether the clang --target=aarch64-linux-musl --sysroot=/data/data/com.termux/files/home/code/cpp_agent/musl-sysroot linker (/data/data/com.termux/files/usr/bin/ld) supports shared libraries... yes
+checking dynamic linker characteristics... GNU/Linux ld.so
+checking how to hardcode library paths into programs... immediate
+checking whether stripping libraries is possible... yes
+checking if libtool supports shared libraries... yes
+checking whether to build shared libraries... no
+checking whether to build static libraries... yes
+checking whether to build shared libraries with -version-info... yes
+checking whether to build shared libraries with -no-undefined... no
+checking whether to build shared libraries with -mimpure-text... no
+checking whether to build shared libraries with PIC... yes
+checking whether to build static libraries with PIC... no
+checking whether to build shared libraries only... no
+checking whether to build static libraries only... yes
+checking for aarch64-linux-musl-windres... no
+checking for windres... windres
+checking if cpp -P is needed... no
+checking if compiler is DEC/Compaq/HP C... no
+checking if compiler is HP-UX C... no
+checking if compiler is IBM C... no
+checking if compiler is Intel C... no
+checking if compiler is clang... yes
+checking if compiler is xlclang... no
+checking if compiler is Apple clang... no
+checking compiler version... clang '2101' (raw: 'clang version 21.1.8' / '21.1')
+checking if compiler is GNU C... no
+checking if compiler is SunPro C... no
+checking if compiler is Tiny C... no
+checking for code coverage support... no
+checking whether build target is a native Windows one... no
+checking if compiler accepts some basic options... yes
+configure: compiler options added: -Qunused-arguments -Werror-implicit-function-declaration 
+checking if compiler optimizer assumed setting might be used... no
+checking if compiler halts on compilation errors... yes
+checking if compiler halts on negative sized arrays... yes
+checking if compiler halts on function prototype mismatch... yes
+checking if compiler supports hiding library internal symbols... yes
+checking whether build target supports Win32 crypto API... no
+checking whether to build libcurl and curl in "unity" mode... no
+checking whether to support http... yes
+checking whether to support ftp... yes
+checking whether to support file... yes
+checking whether to support IPFS... yes
+checking whether to support ldap... no
+checking whether to support ldaps... no
+checking whether to support rtsp... yes
+checking whether to support proxies... yes
+checking whether to support dict... yes
+checking whether to support telnet... yes
+checking whether to support tftp... yes
+checking whether to support pop3... yes
+checking whether to support imap... yes
+checking whether to support smb... no
+checking whether to support smtp... yes
+checking whether to support gopher... yes
+checking whether to support mqtt... no
+checking enable curl_global_init_mem debug build... no
+checking whether to provide built-in manual... yes
+checking whether to build documentation... yes
+configure: WARNING: perl was not found. Cannot build documentation.
+checking whether to enable generation of C code... yes
+checking whether to use libgcc... no
+checking whether to use libbacktrace... no
+checking if X/Open network library is required... no
+checking for gethostbyname... yes
+checking whether build target is a native Windows one... (cached) no
+checking for proto/bsdsocket.h... no
+checking for connect in libraries... yes
+checking for sys/types.h... (cached) yes
+checking for monotonic clock_gettime... yes
+checking for clock_gettime in libraries... no additional lib required
+checking if monotonic clock_gettime works... yes
+checking for sys/types.h... (cached) yes
+checking for raw monotonic clock_gettime... yes
+checking for aarch64-linux-musl-pkg-config... no
+checking for pkg-config... /data/data/com.termux/files/usr/bin/pkg-config
+checking for zlib options with pkg-config... found
+checking for zlib.h... yes
+configure: found both libz and libz.h header
+checking whether to enable IPv6... yes
+checking if struct sockaddr_in6 has sin6_scope_id member... yes
+checking if argv can be written to... yes
+checking if GSS-API support is requested... no
+checking whether to enable Windows native SSL/TLS... no
+checking whether to enable Amiga native SSL/TLS (AmiSSL v5)... no
+configure: PKG_CONFIG_LIBDIR is set to "/data/data/com.termux/files/home/code/cpp_agent/musl-sysroot/usr/lib/pkgconfig"
+checking for aarch64-linux-musl-pkg-config... /data/data/com.termux/files/usr/bin/pkg-config
+checking for openssl options with pkg-config... found
+configure: pkg-config: SSL_LIBS: "-lssl -lcrypto"
+configure: pkg-config: SSL_LDFLAGS: ""
+configure: pkg-config: SSL_CPPFLAGS: ""
+checking for HMAC_Update in -lcrypto... yes
+checking for SSL_connect in -lssl... yes
+checking for openssl/rsa.h... yes
+checking for openssl/crypto.h... yes
+checking for openssl/pem.h... yes
+checking for openssl/ssl.h... yes
+checking for openssl/err.h... yes
+checking for AWS-LC... no
+checking for BoringSSL... no
+checking for LibreSSL... no
+checking for OpenSSL >= v3... checking for SSL_set_quic_use_legacy_codepoint... no
+checking for SSL_set_quic_tls_cbs... yes
+configure: OpenSSL with QUIC APIv2
+checking for DES support in OpenSSL... yes
+checking for SRP support in OpenSSL... no
+checking whether to enable Apple OS native certificate validation... no
+configure: built with one SSL backend
+checking whether to use native CA store... no
+checking default CA cert bundle/path... configure: want no CA no
+no
+checking whether to use OpenSSL's built-in CA store... yes
+checking CA cert bundle path to embed in the curl tool... no
+checking whether versioned symbols are wanted... no
+checking whether to build with libidn2... no
+checking for sys/types.h... (cached) yes
+checking for sys/select.h... yes
+checking for sys/ioctl.h... yes
+checking for unistd.h... (cached) yes
+checking for arpa/inet.h... yes
+checking for net/if.h... yes
+checking for netinet/in.h... yes
+checking for netinet/in6.h... yes
+checking for sys/un.h... yes
+checking for linux/tcp.h... yes
+checking for netinet/tcp.h... yes
+checking for netinet/udp.h... yes
+checking for netdb.h... yes
+checking for sys/sockio.h... no
+checking for sys/param.h... yes
+checking for termios.h... yes
+checking for termio.h... yes
+checking for fcntl.h... yes
+checking for io.h... no
+checking for pwd.h... yes
+checking for utime.h... yes
+checking for sys/utime.h... no
+checking for sys/poll.h... yes
+checking for poll.h... yes
+checking for sys/resource.h... yes
+checking for libgen.h... yes
+checking for locale.h... yes
+checking for stdbool.h... yes
+checking for sys/filio.h... no
+checking for sys/eventfd.h... yes
+checking for an ANSI C-conforming const... yes
+checking for size_t... yes
+checking for sys/types.h... (cached) yes
+checking for struct timeval... yes
+checking runtime libs availability... fine
+checking size of size_t... 8
+checking size of long... 8
+checking size of int... 4
+checking size of time_t... 8
+checking size of off_t... 8
+checking size of curl_off_t... 8
+checking size of curl_socket_t... 4
+checking for ssize_t... yes
+checking for bool... yes
+checking for sa_family_t... yes
+checking for suseconds_t... yes
+checking if time_t is unsigned... no
+checking for struct sockaddr_storage... yes
+checking for sys/select.h... (cached) yes
+checking for select... yes
+checking for sys/types.h... (cached) yes
+checking for recv... yes
+checking for sys/types.h... (cached) yes
+checking for send... yes
+checking for sys/types.h... (cached) yes
+checking for unistd.h... (cached) yes
+checking if alarm can be linked... yes
+checking if alarm is prototyped... yes
+checking if alarm is compilable... yes
+checking if alarm usage allowed... yes
+checking if alarm might be used... yes
+checking for sys/types.h... (cached) yes
+checking for strings.h... (cached) yes
+checking for sys/types.h... (cached) yes
+checking for libgen.h... (cached) yes
+checking if basename can be linked... yes
+checking if basename is prototyped... yes
+checking if basename is compilable... yes
+checking if basename usage allowed... yes
+checking if basename might be used... yes
+checking if closesocket can be linked... no
+checking if closesocket might be used... no
+checking for sys/types.h... (cached) yes
+checking if CloseSocket can be linked... no
+checking if CloseSocket might be used... no
+checking for sys/types.h... (cached) yes
+checking for unistd.h... (cached) yes
+checking for fcntl.h... (cached) yes
+checking if fcntl can be linked... yes
+checking if fcntl is prototyped... yes
+checking if fcntl is compilable... yes
+checking if fcntl usage allowed... yes
+checking if fcntl might be used... yes
+checking if fcntl O_NONBLOCK is compilable... yes
+checking if fcntl O_NONBLOCK usage allowed... yes
+checking if fcntl O_NONBLOCK might be used... yes
+checking whether build target is a native Windows one... (cached) no
+checking for sys/types.h... (cached) yes
+checking for netdb.h... (cached) yes
+checking if freeaddrinfo can be linked... yes
+checking if freeaddrinfo is prototyped... yes
+checking if freeaddrinfo is compilable... yes
+checking if freeaddrinfo usage allowed... yes
+checking if freeaddrinfo might be used... yes
+checking for sys/types.h... (cached) yes
+checking for sys/xattr.h... yes
+checking if fsetxattr can be linked... yes
+checking if fsetxattr is prototyped... yes
+checking if fsetxattr takes 5 args.... yes
+checking if fsetxattr is compilable... yes
+checking if fsetxattr usage allowed... yes
+checking if fsetxattr might be used... yes
+checking for sys/types.h... (cached) yes
+checking if getaddrinfo can be linked... yes
+checking if getaddrinfo is prototyped... yes
+checking if getaddrinfo is compilable... yes
+checking if getaddrinfo seems to work... yes
+checking if getaddrinfo usage allowed... yes
+checking if getaddrinfo might be used... yes
+checking if getaddrinfo is thread-safe... yes
+checking if gethostbyname_r can be linked... yes
+checking if gethostbyname_r is prototyped... yes
+checking if gethostbyname_r takes 3 args.... no
+checking if gethostbyname_r takes 5 args.... no
+checking if gethostbyname_r takes 6 args.... yes
+checking if gethostbyname_r is compilable... yes
+checking if gethostbyname_r usage allowed... yes
+checking if gethostbyname_r might be used... yes
+checking if gethostname can be linked... yes
+checking if gethostname is prototyped... yes
+checking if gethostname is compilable... yes
+checking for gethostname arg 2 data type... size_t
+checking if gethostname usage allowed... yes
+checking if gethostname might be used... yes
+checking for sys/types.h... (cached) yes
+checking for netinet/in.h... (cached) yes
+checking for ifaddrs.h... yes
+checking if getifaddrs can be linked... yes
+checking if getifaddrs is prototyped... no
+checking if getifaddrs might be used... no
+checking if getpeername can be linked... yes
+checking if getpeername is prototyped... yes
+checking if getpeername is compilable... yes
+checking if getpeername usage allowed... yes
+checking if getpeername might be used... yes
+checking if getsockname can be linked... yes
+checking if getsockname is prototyped... yes
+checking if getsockname is compilable... yes
+checking if getsockname usage allowed... yes
+checking if getsockname might be used... yes
+checking for sys/types.h... (cached) yes
+checking if gmtime_r can be linked... yes
+checking if gmtime_r is prototyped... yes
+checking if gmtime_r is compilable... yes
+checking if gmtime_r seems to work... yes
+checking if gmtime_r usage allowed... yes
+checking if gmtime_r might be used... yes
+checking for sys/types.h... (cached) yes
+checking for unistd.h... (cached) yes
+checking for sys/ioctl.h... (cached) yes
+checking for stropts.h... yes
+checking if ioctl can be linked... yes
+checking if ioctl is prototyped... yes
+checking if ioctl is compilable... yes
+checking if ioctl usage allowed... yes
+checking if ioctl might be used... yes
+checking if ioctl FIONBIO is compilable... yes
+checking if ioctl FIONBIO usage allowed... yes
+checking if ioctl FIONBIO might be used... yes
+checking if ioctl SIOCGIFADDR is compilable... yes
+checking if ioctl SIOCGIFADDR usage allowed... yes
+checking if ioctl SIOCGIFADDR might be used... yes
+checking if ioctlsocket can be linked... no
+checking if ioctlsocket might be used... no
+checking if IoctlSocket can be linked... no
+checking if IoctlSocket might be used... no
+checking if localtime_r can be linked... yes
+checking if localtime_r is prototyped... yes
+checking if localtime_r is compilable... yes
+checking if localtime_r seems to work... yes
+checking if localtime_r usage allowed... yes
+checking if localtime_r might be used... yes
+checking if memrchr can be linked... yes
+checking if memrchr is prototyped... yes
+checking if memrchr is compilable... yes
+checking if memrchr usage allowed... yes
+checking if memrchr might be used... yes
+checking for sys/types.h... (cached) yes
+checking if sigaction can be linked... yes
+checking if sigaction is prototyped... yes
+checking if sigaction is compilable... yes
+checking if sigaction usage allowed... yes
+checking if sigaction might be used... yes
+checking if siginterrupt can be linked... yes
+checking if siginterrupt is prototyped... yes
+checking if siginterrupt is compilable... yes
+checking if siginterrupt usage allowed... yes
+checking if siginterrupt might be used... yes
+checking if signal can be linked... yes
+checking if signal is prototyped... yes
+checking if signal is compilable... yes
+checking if signal usage allowed... yes
+checking if signal might be used... yes
+checking for sys/types.h... (cached) yes
+checking if sigsetjmp can be linked... yes
+checking if sigsetjmp is prototyped... yes
+checking if sigsetjmp is compilable... yes
+checking if sigsetjmp usage allowed... yes
+checking if sigsetjmp might be used... yes
+checking if socket can be linked... yes
+checking if socket is prototyped... yes
+checking if socket is compilable... yes
+checking if socket usage allowed... yes
+checking if socket might be used... yes
+checking if socketpair can be linked... yes
+checking if socketpair is prototyped... yes
+checking if socketpair is compilable... yes
+checking if socketpair usage allowed... yes
+checking if socketpair might be used... yes
+checking if strerror_r can be linked... yes
+checking if strerror_r is prototyped... yes
+checking if strerror_r is compilable... yes
+checking if strerror_r is glibc like... yes
+checking if strerror_r seems to work... no
+checking if strerror_r is POSIX like... no
+checking if strerror_r might be used... no
+configure: WARNING: cannot determine strerror_r() style: edit lib/curl_config.h manually.
+checking for accept4... yes
+checking for eventfd... yes
+checking for fnmatch... yes
+checking for geteuid... yes
+checking for getpass_r... no
+checking for getppid... yes
+checking for getpwuid... yes
+checking for getpwuid_r... yes
+checking for getrlimit... yes
+checking for gettimeofday... yes
+checking for mach_absolute_time... no
+checking for pipe... yes
+checking for poll... yes
+checking for sendmmsg... yes
+checking for sendmsg... yes
+checking for setlocale... yes
+checking for setrlimit... yes
+checking for utime... yes
+checking for utimes... yes
+checking for pipe2... yes
+checking for if_nametoindex... yes
+checking for realpath... yes
+checking for sched_yield... yes
+checking for sys/types.h... (cached) yes
+checking for netinet/in.h... (cached) yes
+checking for arpa/inet.h... (cached) yes
+checking if inet_ntop can be linked... yes
+checking if inet_ntop is prototyped... yes
+checking if inet_ntop is compilable... yes
+checking if inet_ntop seems to work... yes
+checking if inet_ntop usage allowed... yes
+checking if inet_ntop might be used... yes
+checking if inet_pton can be linked... yes
+checking if inet_pton is prototyped... yes
+checking if inet_pton is compilable... yes
+checking if inet_pton seems to work... yes
+checking if inet_pton usage allowed... yes
+checking if inet_pton might be used... yes
+checking if strcasecmp can be linked... yes
+checking if strcasecmp is prototyped... yes
+checking if strcasecmp is compilable... yes
+checking if strcasecmp usage allowed... yes
+checking if strcasecmp might be used... yes
+checking if strcmpi can be linked... no
+checking if strcmpi might be used... no
+checking if stricmp can be linked... no
+checking if stricmp might be used... no
+checking if memset_s can be linked... no
+checking if memset_s might be used... no
+checking for memset_explicit... no
+checking for fseeko... yes
+checking for clang --target=aarch64-linux-musl --sysroot=/data/data/com.termux/files/home/code/cpp_agent/musl-sysroot options needed to detect all undeclared functions... none needed
+checking whether fseeko is declared... yes
+checking how to set a socket into non-blocking mode... fcntl O_NONBLOCK
+checking whether to enable the threaded resolver... yes
+checking for pthread.h... yes
+checking for pthread_create... yes
+checking for dirent.h... yes
+checking for opendir... yes
+checking convert -I options to -isystem... yes
+checking whether to enable curl_easy_setopt()/curl_easy_getinfo() type checking... yes
+checking whether to enable verbose strings... yes
+checking whether to enable SSPI support (Windows native builds only)... no
+checking whether to enable basic authentication method... yes
+checking whether to enable bearer authentication method... yes
+checking whether to enable digest authentication method... yes
+checking whether to enable kerberos authentication method... yes
+checking whether to enable negotiate authentication method... yes
+checking whether to enable aws sig methods... yes
+checking whether to support NTLM... no
+checking whether to enable TLS-SRP authentication... yes
+checking whether to enable Unix domain sockets... auto
+checking for struct sockaddr_un.sun_path... yes
+checking whether to support cookies... yes
+checking whether to support socketpair... yes
+checking whether to support HTTP authentication... yes
+checking whether to support DoH... yes
+checking whether to support the MIME API... yes
+checking whether to support binding connections locally... yes
+checking whether to support the form API... yes
+checking whether to support date parsing... yes
+checking whether to support netrc parsing... yes
+checking whether to support progress-meter... yes
+checking whether to support the SHA-512/256 hash algorithm... yes
+checking whether to support DNS shuffling... yes
+checking whether to support curl_easy_option*... yes
+checking whether to support alt-svc... yes
+checking whether to support headers-api... yes
+checking whether to support HSTS... yes
+checking whether to enable HTTPS-RR support... no
+checking for SSL_set0_wbio... yes
+checking whether to support WebSockets... yes
+checking whether hiding of library internal symbols does actually happen... yes
+checking if this build supports HTTPS-proxy... yes
+configure: using CFLAGS: -O2 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Qunused-arguments -Werror-implicit-function-declaration
+configure: CFLAGS note: CFLAGS should only be used to specify C compiler flags, not macro suppressions. Use CPPFLAGS for: -U_FORTIFY_SOURCE
+configure: CFLAGS note: CFLAGS should only be used to specify C compiler flags, not macro definitions. Use CPPFLAGS for: -D_FORTIFY_SOURCE=0
+configure: WARNING: Continuing even with errors mentioned immediately above this line.
+checking that generated files are newer than configure... done
+configure: creating ./config.status
+config.status: creating Makefile
+config.status: creating docs/Makefile
+config.status: creating docs/examples/Makefile
+config.status: creating docs/libcurl/Makefile
+config.status: creating docs/libcurl/opts/Makefile
+config.status: creating docs/cmdline-opts/Makefile
+config.status: creating include/Makefile
+config.status: creating include/curl/Makefile
+config.status: creating src/Makefile
+config.status: creating lib/Makefile
+config.status: creating scripts/Makefile
+config.status: creating lib/libcurl.vers
+config.status: creating tests/Makefile
+config.status: creating tests/config
+config.status: creating tests/configurehelp.pm
+config.status: creating tests/certs/Makefile
+config.status: creating tests/data/Makefile
+config.status: creating tests/server/Makefile
+config.status: creating tests/libtest/Makefile
+config.status: creating tests/unit/Makefile
+config.status: creating tests/tunit/Makefile
+config.status: creating tests/http/config.ini
+config.status: creating tests/http/Makefile
+config.status: creating projects/Makefile
+config.status: creating projects/vms/Makefile
+config.status: creating libcurl.pc
+config.status: creating curl-config
+config.status: creating lib/curl_config.h
+config.status: lib/curl_config.h is unchanged
+config.status: executing depfiles commands
+config.status: executing libtool commands
+configure: Configured to build curl/libcurl:
+
+  Host setup:       aarch64-unknown-linux-musl
+  Install prefix:   /data/data/com.termux/files/home/code/cpp_agent/curl-8.21.0/install
+  Compiler:         clang --target=aarch64-linux-musl --sysroot=/data/data/com.termux/files/home/code/cpp_agent/musl-sysroot
+   CFLAGS:          -O2 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Qunused-arguments -Werror-implicit-function-declaration
+   CFLAGS extras:   
+   CPPFLAGS:        -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -D_GNU_SOURCE -isystem /data/data/com.termux/files/usr/include
+   LDFLAGS:         -static -L/data/data/com.termux/files/home/code/cpp_agent/musl-sysroot/usr/lib -L/data/data/com.termux/files/home/code/cpp_agent/musl-sysroot/usr/lib/gcc/aarch64-alpine-linux-musl/15.2.0 -Wl,-plugin,/data/data/com.termux/files/home/code/cpp_agent/musl-sysroot/usr/lib/bfd-plugins/liblto_plugin.so -L/data/data/com.termux/files/usr/lib
+     curl-config:   -L/data/data/com.termux/files/home/code/cpp_agent/musl-sysroot/usr/lib -L/data/data/com.termux/files/home/code/cpp_agent/musl-sysroot/usr/lib/gcc/aarch64-alpine-linux-musl/15.2.0
+   LIBS:            -lssl -lcrypto -lssl -lcrypto -lz -lssl -lcrypto -lz
+
+  curl version:     8.21.0
+  SSL:              enabled (OpenSSL)
+  SSH:              no       (--with-{libssh,libssh2})
+  zlib:             enabled
+  brotli:           no       (--with-brotli)
+  zstd:             no       (--with-zstd)
+  GSS-API:          no       (--with-gssapi)
+  GSASL:            no       (--with-gsasl)
+  TLS-SRP:          no       (--enable-tls-srp)
+  resolver:         POSIX threaded
+  IPv6:             enabled
+  Unix sockets:     enabled
+  IDN:              no       (--with-{libidn2,winidn})
+  Build docs:       enabled  (--disable-docs)
+  Build libcurl:    Shared=no, Static=yes
+  Built-in manual:  enabled
+  --libcurl option: enabled  (--disable-libcurl-option)
+  Type checking:    enabled  (--disable-typecheck)
+  Verbose errors:   enabled  (--disable-verbose)
+  Code coverage:    disabled
+  SSPI:             no       (--enable-sspi)
+  CA native:        no
+  CA cert bundle:   no
+  CA cert path:     no
+  CA cert embed:    no
+  CA fallback:      yes
+  LDAP:             no       (--enable-ldap / --with-ldap-lib / --with-lber-lib)
+  LDAPS:            no       (--enable-ldaps)
+  IPFS/IPNS:        enabled
+  RTSP:             enabled
+  PSL:              no       (--with-libpsl)
+  Alt-svc:          enabled  (--disable-alt-svc)
+  Headers API:      enabled  (--disable-headers-api)
+  HSTS:             enabled  (--disable-hsts)
+  HTTP1:            enabled  (internal)
+  HTTP2:            no       (--with-nghttp2)
+  HTTP3:            no       (--with-ngtcp2 --with-nghttp3, --with-quiche)
+  proxy-HTTP3:      no      (--enable-proxy-http3)
+  ECH:              no      (--enable-ech)
+  HTTPS RR:         no      (--enable-httpsrr)
+  SSLS-EXPORT:      no      (--enable-ssls-export)
+  Protocols:        dict file ftp ftps gopher gophers http https imap imaps ipfs ipns mqtt mqtts pop3 pop3s rtsp smtp smtps telnet tftp ws wss
+  Features:         alt-svc AsynchDNS HSTS HTTPS-proxy IPv6 Largefile libz SSL threadsafe UnixSockets
+
