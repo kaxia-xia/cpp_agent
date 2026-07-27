@@ -392,14 +392,29 @@ Agent 的 47 个工具中，部分需要额外安装软件才能使用。以下�
 > pip install Pillow qrcode pyzbar matplotlib
 > ```
 
-### 3️⃣ 编译
+### 3️⃣ 编译与安装
 
 ```bash
 # 在项目根目录执行
-cmake -B build && cmake --build build
+cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build
 ```
 
 编译产物为 `build/coding-agent`。
+
+#### 一键安装
+
+```bash
+# 安装到默认位置 ~/.local/bin（无需 sudo）
+cmake --install build
+
+# 或指定自定义安装前缀
+cmake --install build --prefix /usr/local
+
+# 也可以通过 cmake 变量预设置安装路径
+cmake -B build -DCMAKE_INSTALL_PREFIX=/opt/coding-agent && cmake --build build && cmake --install build
+```
+
+安装后可直接运行 `coding-agent`（需确保安装目录在 `PATH` 中，即 `~/.local/bin` 已在 PATH 或手动添加）。
 
 > 💡 Termux 下 CMake 会自动探测 `$PREFIX` 并设置 Termux 特有的头文件/库搜索路径及 RPATH。
 
@@ -450,14 +465,24 @@ sudo apt install python3 python3-pip
 pip install Pillow qrcode pyzbar matplotlib
 ```
 
-### 3️⃣ 编译
+### 3️⃣ 编译与安装
 
 ```bash
 # 在项目根目录执行（与 Termux 完全相同）
-cmake -B build && cmake --build build
+cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build
 ```
 
 编译产物为 `build/coding-agent`。
+
+#### 一键安装
+
+```bash
+# 安装到默认位置 ~/.local/bin
+cmake --install build
+
+# 或指定自定义目录
+cmake --install build --prefix /usr/local
+```
 
 > 💡 CMake 在非 Termux 环境下不会设置 `$PREFIX` 路径，构建系统会自动跳过 Termux 特有的 RPATH 配置，使用标准 Linux 库搜索路径。
 
@@ -626,7 +651,7 @@ context versions (* = current):
 
 ```
 cpp_agent/
-├── CMakeLists.txt        # 构建配置（C++20，libcurl，Termux 探测）
+├── CMakeLists.txt        # 构建配置（C++20，libcurl，Termux 探测，一键安装）
 ├── build/
 │   └── coding-agent      # 编译产物
 └── src/

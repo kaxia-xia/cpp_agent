@@ -85,3 +85,25 @@ add_custom_command(
 )
 add_custom_target(copy_prompt DEPENDS "${PROMPT_DEST}")
 add_dependencies(coding-agent copy_prompt)
+
+# ── Install ─────────────────────────────────────────────────────────
+# One-click install: cmake --install build [--prefix /path]
+# Default prefix: ~/.local  →  installs to ~/.local/bin/
+# Override examples:
+#   cmake --install build --prefix /usr/local
+#   cmake -B build -DCMAKE_INSTALL_PREFIX=/opt/coding-agent ..
+if(NOT CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    # User explicitly set -DCMAKE_INSTALL_PREFIX, keep it
+else()
+    set(CMAKE_INSTALL_PREFIX "$ENV{HOME}/.local" CACHE PATH
+        "Install prefix (binary goes to <prefix>/bin)" FORCE)
+endif()
+message(STATUS "Install prefix: ${CMAKE_INSTALL_PREFIX}  (binary → ${CMAKE_INSTALL_PREFIX}/bin)")
+
+install(TARGETS coding-agent
+    RUNTIME DESTINATION "bin"
+)
+install(FILES "${PROMPT_DEST}"
+    DESTINATION "bin"
+    RENAME "system_prompt.txt"
+)
