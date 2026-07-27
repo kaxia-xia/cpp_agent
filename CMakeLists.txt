@@ -9,15 +9,6 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# ── Static build option ─────────────────────────────────────────────
-# Enable with: cmake -DBUILD_STATIC=ON ...
-# Produces a statically-linked binary (no shared library deps).
-# NOTE: On Termux/Android (Bionic libc), full static linking is not
-# supported by the platform — libc++ ships only as a shared library.
-# The option will still try to statically link third-party libs (curl)
-# while keeping system libraries dynamic.
-option(BUILD_STATIC "Build a static executable (no shared library deps)" OFF)
-
 # ── Platform detection ──────────────────────────────────────────────
 # Termux runs on Android with Bionic libc, which defines __ANDROID__.
 # Regular ARM64 Linux uses glibc/musl and does NOT define __ANDROID__.
@@ -66,40 +57,18 @@ add_executable(coding-agent
 target_include_directories(coding-agent PRIVATE src)
 target_link_libraries(coding-agent PRIVATE CURL::libcurl Threads::Threads)
 
-# ── Static build configuration ──────────────────────────────────────
-# Applied after target creation so target_link_options can reference it.
-if(BUILD_STATIC)
-    if(TERMUX_BUILD)
-        # Bionic libc does NOT support full -static linking, and Termux
-        # ships libc++ as a shared library (libc++_shared.so) with no
-        # static counterpart. The best we can do is statically link
-        # third-party libraries (curl, etc.) while keeping system libs
-        # dynamic.
-        message(STATUS "Termux detected: attempting to statically link "
-                       "third-party libraries (system libs stay dynamic)")
+# ── Discovery server & client ──────────────────────────────────────
+add_executable(discovery-server
+    src/server_main.cpp
+)
+target_include_directories(discovery-server PRIVATE src)
+target_link_libraries(discovery-server PRIVATE Threads::Threads)
 
-        # Try to locate and use static libcurl
-        find_library(CURL_STATIC NAMES libcurl.a
-                     PATHS "$ENV{PREFIX}/lib"
-                     NO_DEFAULT_PATH
-                     NO_CMAKE_FIND_ROOT_PATH)
-        if(CURL_STATIC AND CURL_STATIC MATCHES "\.a$")
-            message(STATUS "Found static libcurl: ${CURL_STATIC}")
-            target_link_libraries(coding-agent PRIVATE "${CURL_STATIC}")
-        else()
-            message(WARNING "libcurl.a not found in $ENV{PREFIX}/lib — "
-                            "curl will be dynamically linked. "
-                            "Install static curl with: pkg install libcurl-static "
-                            "(if available) or build curl from source.")
-        endif()
-    else()
-        # Desktop Linux / glibc: full static linking is supported.
-        message(STATUS "Desktop Linux: using full static linking")
-        target_link_options(coding-agent PRIVATE -static -static-libgcc -static-libstdc++)
-        # Prefer static libs for further find_package calls
-        set(CMAKE_FIND_LIBRARY_SUFFIXES ".a;${CMAKE_FIND_LIBRARY_SUFFIXES}")
-    endif()
-endif()
+add_executable(discovery-client
+    src/client_main.cpp
+)
+target_include_directories(discovery-client PRIVATE src)
+target_link_libraries(discovery-client PRIVATE Threads::Threads)
 
 # Help locate shared libs at runtime on Termux (loader already searches
 # $PREFIX/lib, but be explicit in case of cross-prefix installs).
