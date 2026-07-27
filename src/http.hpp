@@ -125,6 +125,10 @@ public:
         curl_easy_setopt(curl_, CURLOPT_HTTPHEADER, headers_);
         curl_easy_setopt(curl_, CURLOPT_TIMEOUT, timeout_seconds);
         curl_easy_setopt(curl_, CURLOPT_CONNECTTIMEOUT, 60L);
+        // If the transfer rate drops below 10 bytes/sec for 30+ seconds,
+        // treat the connection as stalled and abort.
+        curl_easy_setopt(curl_, CURLOPT_LOW_SPEED_LIMIT, 10L);
+        curl_easy_setopt(curl_, CURLOPT_LOW_SPEED_TIME, 30L);
         curl_easy_setopt(curl_, CURLOPT_FOLLOWLOCATION, 1L);
         curl_easy_setopt(curl_, CURLOPT_WRITEFUNCTION, &Client::write_cb);
         curl_easy_setopt(curl_, CURLOPT_WRITEDATA, &body_buf);
@@ -219,6 +223,10 @@ public:
         curl_easy_setopt(curl_, CURLOPT_HTTPHEADER, headers_);
         curl_easy_setopt(curl_, CURLOPT_TIMEOUT, timeout_seconds);
         curl_easy_setopt(curl_, CURLOPT_CONNECTTIMEOUT, 60L);
+        // If the transfer rate drops below 10 bytes/sec for 30+ seconds,
+        // treat the connection as stalled and abort.
+        curl_easy_setopt(curl_, CURLOPT_LOW_SPEED_LIMIT, 10L);
+        curl_easy_setopt(curl_, CURLOPT_LOW_SPEED_TIME, 30L);
         curl_easy_setopt(curl_, CURLOPT_FOLLOWLOCATION, 1L);
         curl_easy_setopt(curl_, CURLOPT_WRITEFUNCTION, &Client::write_cb);
         curl_easy_setopt(curl_, CURLOPT_WRITEDATA, &body_buf);

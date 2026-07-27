@@ -319,6 +319,15 @@ inline CompletionResult chat_completion_stream(
     }
 
     result.assistant = std::move(am);
+
+    // If the response was truncated due to max_tokens, warn on stderr.
+    if (result.finish_reason == "length") {
+        std::cerr << "\033[33m"
+                  << "[warn] LLM response may be truncated (finish_reason=length). "
+                  << "Consider increasing --max-tokens or asking for a shorter answer."
+                  << "\033[0m\n";
+    }
+
     return result;
 }
 

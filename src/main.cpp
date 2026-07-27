@@ -490,9 +490,10 @@ std::string auto_commit(const fs::path& root, std::string_view label,
     set_color("2");
     std::cerr << "[git] committing changes... " << std::flush;
     reset_color();
-    return git::commit_changes(root, label, dirty_before);
+    std::string hash = git::commit_changes(root, label, dirty_before);
     std::cerr << "\r\033[K";
     std::cerr << std::flush;
+    return hash;
 }
 
 // ── REPL input reader ────────────────────────────────────────────────

@@ -6,6 +6,12 @@ WORKSPACE
   root: {root}
   os:   Linux (arm64)
 
+IMPORTANT NOTES FOR THIS ENVIRONMENT:
+  - When using sudo, always use 'sudo -n' (non-interactive). sudo cannot prompt for passwords.
+    If 'sudo -n' fails, inform the user they need passwordless sudo or run the command manually.
+  - When reporting command output (like firewall rules), summarize briefly rather than
+    dumping raw output verbatim. Keep responses concise to avoid hitting token limits.
+
 TOOLS available (call via function/tool calling):
   - read_file(path, offset?, limit?, max_bytes?, start_line?, end_line?): read file with optional byte offset/limit for large files, or line-based reading with start_line/end_line (1-based).
   - write_file(path, content): create/overwrite a file; parent dirs auto-created.

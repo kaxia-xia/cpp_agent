@@ -69,6 +69,11 @@ inline ShellResult run_shell(std::string_view cmd, const fs::path& cwd, int time
     posix_spawn_file_actions_adddup2(&fa, pipefd[1], STDERR_FILENO);
     posix_spawn_file_actions_addclose(&fa, pipefd[0]);
     posix_spawn_file_actions_addclose(&fa, pipefd[1]);
+    // Redirect stdin from /dev/null so child processes (e.g. sudo)
+    // cannot block waiting for interactive terminal input.
+    // Must close stdin first; file actions execute in order.
+    posix_spawn_file_actions_addclose(&fa, STDIN_FILENO);
+    posix_spawn_file_actions_addopen(&fa, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
 
     std::string wrapped = std::format("cd {} && {}", cwd.string(), cmd);
     const char* argv2[] = {"/bin/sh", "-c", wrapped.c_str(), nullptr};
