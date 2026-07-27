@@ -57,19 +57,6 @@ add_executable(coding-agent
 target_include_directories(coding-agent PRIVATE src)
 target_link_libraries(coding-agent PRIVATE CURL::libcurl Threads::Threads)
 
-# ── Discovery server & client ──────────────────────────────────────
-add_executable(discovery-server
-    src/server_main.cpp
-)
-target_include_directories(discovery-server PRIVATE src)
-target_link_libraries(discovery-server PRIVATE Threads::Threads)
-
-add_executable(discovery-client
-    src/client_main.cpp
-)
-target_include_directories(discovery-client PRIVATE src)
-target_link_libraries(discovery-client PRIVATE Threads::Threads)
-
 # Help locate shared libs at runtime on Termux (loader already searches
 # $PREFIX/lib, but be explicit in case of cross-prefix installs).
 if(TERMUX_BUILD)
