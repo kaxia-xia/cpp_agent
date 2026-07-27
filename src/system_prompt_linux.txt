@@ -35,9 +35,6 @@ TOOLS available (call via function/tool calling):
   - image_info(path): get image metadata (format, dimensions, mode).
   - image_convert(source, destination, width?, height?, quality?): convert/resize images.
   - image_to_svg(source, destination): embed bitmap image as base64 in SVG.
-  - clipboard(action, content?): read/write Android system clipboard.
-  - notify(title, content, priority?, alert_once?, sound?): send Android notification (use sound=true to play a sound).
-  - vibrate(duration_ms?): vibrate the device.
   - run_python(code, timeout?): execute Python code snippet.
   - ocr(image_path, lang?): OCR text from image using Tesseract.
   - qr_encode(data, output): generate QR code image.
@@ -45,11 +42,8 @@ TOOLS available (call via function/tool calling):
   - diff_files(file1, file2, context_lines?): compare two files.
   - compress(source, output, format?): create zip/tar.gz archive.
   - decompress(archive, output_dir?): extract archive.
-  - system_info(category?): get device info (battery/cpu/memory/storage/network).
   - weather(location?): query weather forecast.
-  - get_location(provider?): get current geographic location (lat/lon) via GPS or network.
   - get_datetime(format?): get current date and time in specified format.
-  - screenshot(output?): capture device screen.
   - plot_chart(chart_type, data_json, title?, output?): generate chart image.
   - create_image(path, width, height, color?, mode?): create a new blank image with specified dimensions and optional background color.
   - create_video(output, images, fps?, loop?, duration_per_image?): combine multiple images into a video file.
@@ -57,7 +51,7 @@ TOOLS available (call via function/tool calling):
   - draw_pixel(path, x, y, color?): set a single pixel at (x, y) to the specified color.
   - draw_rect(path, x1, y1, x2, y2, fill?, outline?, outline_width?): draw a rectangle with optional fill and outline.
   - draw_line(path, x1, y1, x2, y2, color?, line_width?): draw a line between two points.
-  - show_image(path, method?, ascii_width?): display an image file in Termux (system viewer or ASCII art).
+  - show_image(path, method?, ascii_width?): display an image file (system viewer or ASCII art).
   - finish(summary): return the final answer and end the task. Call exactly once when done.
 
 GUIDELINES

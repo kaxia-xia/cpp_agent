@@ -415,16 +415,12 @@ cmake -B build && cmake --build build
 # Ubuntu / Debian
 sudo apt update
 sudo apt install cmake g++ libcurl4-openssl-dev git
-
-# 或使用 clang（二者选一即可）
-sudo apt install cmake clang libc++-dev libcurl4-openssl-dev git
 ```
 
 > **编译器说明**：项目需要 **C++20** 支持。
-> - **GCC 11+**（Ubuntu 22.04 自带 GCC 11，满足要求）
-> - **Clang 14+**（需额外 `apt install clang`）
+> - **GCC 13+**
 >
-> CMake 会自动检测可用编译器。若使用 Clang，建议同时安装 `libc++-dev` 以获得 libc++ 运行时（CMake 会自动探测并启用，若不可用则回退到 libstdc++，不影响构建）。
+> CMake 会自动检测可用编译器。
 
 ### 2️⃣ Agent 工具依赖（按需安装）
 
