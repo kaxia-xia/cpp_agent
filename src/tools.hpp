@@ -1811,14 +1811,26 @@ inline std::string execute(const std::string& name, std::string_view arguments,
 
 
         // ── fetch_url ────────────────────────────────────────────────
+        // All external HTTP requests are routed through Jina Reader
+        // (https://r.jina.ai/) to obtain clean, reader-friendly markdown.
         if (name == "fetch_url") {
             std::string url = get_str("url");
             if (url.empty()) return "[tool error: 'url' required]";
             int timeout = std::clamp(get_int("timeout", 30), 5, 120);
             size_t max_bytes = static_cast<size_t>(std::max(1024, get_int("max_bytes", 200000)));
 
+            // Route through Jina Reader for all http/https URLs that are
+            // not already going through r.jina.ai.
+            std::string fetch_url = url;
+            bool via_jina = false;
+            if ((url.starts_with("http://") || url.starts_with("https://")) &&
+                url.find("r.jina.ai") == std::string::npos) {
+                fetch_url = "https://r.jina.ai/" + url;
+                via_jina = true;
+            }
+
             std::string escaped_url;
-            for (char c : url) {
+            for (char c : fetch_url) {
                 if (c == '\'') escaped_url += "'\\''";
                 else escaped_url.push_back(c);
             }
@@ -1839,6 +1851,7 @@ inline std::string execute(const std::string& name, std::string_view arguments,
 
             std::ostringstream ss;
             ss << std::format("[HTTP {} | {} bytes", status_code, total);
+            if (via_jina) ss << std::format(" | via Jina Reader (r.jina.ai)");
             if (total > max_bytes) ss << std::format(" (showing first {})", max_bytes);
             ss << "]\n";
             ss << result;
