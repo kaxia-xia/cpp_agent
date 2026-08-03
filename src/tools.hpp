@@ -43,15 +43,10 @@ struct ToolError : std::runtime_error {
 struct PathBlockedError : std::runtime_error {
     PathBlockedError(std::string_view path, std::string_view root_path)
         : std::runtime_error(std::format(
-              "[BLOCKED] The path '{}' is OUTSIDE the workspace root '{}'.\n\n"
-              "⛔  DO NOT try to work around this.  You MUST do the following:\n"
-              "  1. Tell the user clearly which path you need to access and why.\n"
-              "  2. Ask: \"Allow access to <path>? [y/n]\"\n"
-              "  3. WAIT for the user's reply.  Do nothing until you receive it.\n"
-              "  4. If user replies 'y': use run_command to access the path.\n"
-              "  5. If user replies 'n': abandon this approach and find an alternative.\n\n"
-              "Until the user explicitly replies 'y', you are FORBIDDEN from accessing "
-              "any file or directory outside the workspace.", path, root_path))
+              "[BLOCKED] '{}' is outside workspace '{}'.\n"
+              "Ask user: \"Allow access to {}? [y/n]\"\n"
+              "If user replies y: use run_command(allow_external: true, command: \"...\")",
+              path, root_path, path))
         , blocked_path(path), workspace_root(root_path) {}
     std::string blocked_path;
     std::string workspace_root;
@@ -251,6 +246,10 @@ inline json::Value tool_schemas() {
         to_p["description"] = json::Value{"Timeout in seconds (default 60, max 300)."};
         to_p["default"] = json::Value{60};
         props["timeout"] = json::Value{std::move(to_p)};
+        json::Object ae_p; ae_p["type"] = json::Value{"boolean"};
+        ae_p["description"] = json::Value{"Set to true ONLY after user explicitly confirmed (typed 'y') that external path access is allowed. Bypasses the external-path safety check."};
+        ae_p["default"] = json::Value{false};
+        props["allow_external"] = json::Value{std::move(ae_p)};
         p["properties"] = json::Value{std::move(props)};
         p["required"] = json::make_array<std::string>({"command"});
         tools.push_back(fn("run_command",
@@ -1459,94 +1458,68 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             std::string cmd = get_str("command");
             if (cmd.empty()) return "[tool error: 'command' required]";
 
-            // ── Pre-scan: detect attempts to access paths outside the workspace ──
-            // Build a list of suspicious external path prefixes that are NOT under root.
-            // We look for absolute paths that start with common system directories.
-            static const std::vector<std::string> system_prefixes = {
-                "/etc/", "/sdcard/", "/storage/", "/system/", "/proc/", "/sys/",
-                "/dev/", "/mnt/", "/vendor/", "/product/", "/odm/", "/oem/",
-                "/data/local/", "/data/misc/", "/sdcard/", "/storage/emulated/",
-            };
-            std::string root_str = root.string();
-            // Normalise trailing slash for prefix comparison
-            std::string root_prefix = root_str;
-            if (!root_prefix.empty() && root_prefix.back() != '/') root_prefix += '/';
+            bool allow_external = get_bool("allow_external", false);
 
-            // Scan the command for any absolute path that looks like it might
-            // be outside the workspace.
-            std::string blocked_path;
-            auto check_path = [&](std::string_view path_candidate) {
-                if (blocked_path.empty() && path_candidate.size() > 1 &&
-                    path_candidate[0] == '/') {
-                    std::string pc(path_candidate);
-                    // If it's under the workspace root, allow it
-                    if (pc.starts_with(root_prefix)) return;
-                    // Check against system prefixes
-                    for (const auto& sp : system_prefixes) {
-                        if (pc.starts_with(sp)) {
-                            blocked_path = pc;
-                            return;
+            if (!allow_external) {
+                // ── Pre-scan: detect attempts to access paths outside workspace ──
+                static const std::vector<std::string> system_prefixes = {
+                    "/etc/", "/sdcard/", "/storage/", "/system/", "/proc/", "/sys/",
+                    "/dev/", "/mnt/", "/vendor/", "/product/", "/odm/", "/oem/",
+                    "/data/local/", "/data/misc/", "/sdcard/", "/storage/emulated/",
+                };
+                std::string root_str = root.string();
+                std::string root_prefix = root_str;
+                if (!root_prefix.empty() && root_prefix.back() != '/') root_prefix += '/';
+
+                std::string blocked_path;
+                auto check_path = [&](std::string_view path_candidate) {
+                    if (blocked_path.empty() && path_candidate.size() > 1 &&
+                        path_candidate[0] == '/') {
+                        std::string pc(path_candidate);
+                        if (pc.starts_with(root_prefix)) return;
+                        for (const auto& sp : system_prefixes) {
+                            if (pc.starts_with(sp)) { blocked_path = pc; return; }
                         }
+                        if (!pc.starts_with(root_prefix)) blocked_path = pc;
                     }
-                    // Any other absolute path outside root is also suspicious
-                    if (!pc.starts_with(root_prefix)) {
-                        blocked_path = pc;
-                    }
-                }
-            };
+                };
 
-            // Find path-like tokens in the command: quoted paths, paths after
-            // common commands (cd, ls, cat, rm, cp, mv, etc.)
-            std::istringstream cmd_stream(cmd);
-            std::string token;
-            bool prev_was_path_cmd = false;
-            while (cmd_stream >> token) {
-                // Remove surrounding quotes
-                std::string_view clean = token;
-                if (clean.size() >= 2) {
-                    char f = clean.front(), b = clean.back();
-                    if ((f == '\'' && b == '\'') || (f == '"' && b == '"')) {
-                        clean = clean.substr(1, clean.size() - 2);
+                std::istringstream cmd_stream(cmd);
+                std::string token;
+                bool prev_was_path_cmd = false;
+                while (cmd_stream >> token) {
+                    std::string_view clean = token;
+                    if (clean.size() >= 2) {
+                        char f = clean.front(), b = clean.back();
+                        if ((f == '\'' && b == '\'') || (f == '"' && b == '"'))
+                            clean = clean.substr(1, clean.size() - 2);
                     }
+                    size_t gt_pos = token.find('>');
+                    if (gt_pos != std::string::npos) {
+                        std::string after_gt = token.substr(gt_pos + 1);
+                        if (!after_gt.empty() && after_gt[0] == '/') check_path(after_gt);
+                    }
+                    if (prev_was_path_cmd && clean.size() > 1 && clean[0] == '/')
+                        check_path(clean);
+                    prev_was_path_cmd = (token == "cd" || token == "ls" || token == "cat" ||
+                        token == "rm" || token == "cp" || token == "mv" ||
+                        token == "find" || token == "touch" || token == "mkdir" ||
+                        token == "rmdir" || token == "ln" || token == "chmod" ||
+                        token == "chown" || token == "tar" || token == "zip" ||
+                        token == "unzip" || token == "grep" || token == "sed" ||
+                        token == "awk" || token == "head" || token == "tail" ||
+                        token == "less" || token == "more" || token == "nano" ||
+                        token == "vim" || token == "vi" || token == "stat");
+                    if (clean.size() > 1 && clean[0] == '/') check_path(clean);
                 }
-                // Also check for paths in redirects like >/tmp/x
-                size_t gt_pos = token.find('>');
-                if (gt_pos != std::string::npos) {
-                    std::string after_gt = token.substr(gt_pos + 1);
-                    if (!after_gt.empty() && after_gt[0] == '/')
-                        check_path(after_gt);
-                }
-                if (prev_was_path_cmd && clean.size() > 1 && clean[0] == '/') {
-                    check_path(clean);
-                }
-                // Track commands that typically take a path argument
-                prev_was_path_cmd = (token == "cd" || token == "ls" || token == "cat" ||
-                                     token == "rm" || token == "cp" || token == "mv" ||
-                                     token == "find" || token == "touch" || token == "mkdir" ||
-                                     token == "rmdir" || token == "ln" || token == "chmod" ||
-                                     token == "chown" || token == "tar" || token == "zip" ||
-                                     token == "unzip" || token == "grep" || token == "sed" ||
-                                     token == "awk" || token == "head" || token == "tail" ||
-                                     token == "less" || token == "more" || token == "nano" ||
-                                     token == "vim" || token == "vi" || token == "stat");
-                if (clean.size() > 1 && clean[0] == '/') {
-                    check_path(clean);
-                }
-            }
 
-            if (!blocked_path.empty()) {
-                return std::format(
-                    "[BLOCKED] The command attempts to access '{}' which is "
-                    "OUTSIDE the workspace root '{}'.\n\n"
-                    "⛔  DO NOT try to work around this.  You MUST do the following:\n"
-                    "  1. Tell the user clearly which path you need to access and why.\n"
-                    "  2. Ask: \"Allow access to <path>? [y/n]\"\n"
-                    "  3. WAIT for the user's reply.  Do nothing until you receive it.\n"
-                    "  4. If user replies 'y': the command will be re-attempted.\n"
-                    "  5. If user replies 'n': abandon this approach and find an alternative.\n\n"
-                    "Until the user explicitly replies 'y', you are FORBIDDEN from accessing "
-                    "any file or directory outside the workspace.",
-                    blocked_path, root_str);
+                if (!blocked_path.empty()) {
+                    return std::format(
+                        "[BLOCKED] '{}' is outside workspace '{}'.\n"
+                        "Ask user: \"Allow access to {}? [y/n]\"\n"
+                        "If user replies y: retry with run_command(allow_external: true, ...)",
+                        blocked_path, root_str, blocked_path);
+                }
             }
 
             int timeout = std::clamp(get_int("timeout", 60), 1, 300);
