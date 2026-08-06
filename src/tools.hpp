@@ -1540,6 +1540,13 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             if (ss.str().empty()) ss << "(no output)\n";
             ss << std::format("\n[exit_code={}{}]", r.exit_code,
                               r.timed_out ? ", timed_out" : "");
+            // Let the LLM know that long-running output was mirrored to
+            // the user's terminal in real-time, so the agent doesn't
+            // mistakenly think its output was truncated or invisible.
+            if (r.output.size() > 2000) {
+                ss << "\n[note: command output (" << r.output.size()
+                   << " bytes) was streamed to the user's terminal in real-time via /dev/tty mirror]";
+            }
             return truncate(ss.str());
         }
 
