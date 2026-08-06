@@ -181,16 +181,43 @@ void print_tool_call(std::string_view name, std::string_view args) {
     reset_color();
 }
 
-void print_tool_result(std::string_view result) {
+void print_tool_result(std::string_view result, std::string_view tool_name = "") {
     set_color("2");
     std::string r(result);
-    std::string preview = r.size() > 400 ? (r.substr(0, 400) + "...") : r;
-    std::string line;
-    for (char c : preview) {
-        if (c == '\n') { std::cout << "    " << line << '\n'; line.clear(); }
-        else line.push_back(c);
+    bool is_run_cmd = (tool_name == "run_command");
+
+    if (is_run_cmd) {
+        // Real-time output is mirrored to /dev/tty, so we only show a
+        // brief summary here.  But fall back to showing the output if
+        // it's short (no TTY available, e.g. background run).
+        const size_t kShortThreshold = 2000;
+        if (r.size() <= kShortThreshold) {
+            // Short output — show it all (fits in a few lines).
+            std::string line;
+            for (char c : r) {
+                if (c == '\n') { std::cout << "    " << line << '\n'; line.clear(); }
+                else line.push_back(c);
+            }
+            if (!line.empty()) std::cout << "    " << line << '\n';
+        } else {
+            // Long output — real-time mirror already showed it.
+            // Just extract the exit_code line.
+            auto pos = r.rfind("[exit_code=");
+            if (pos != std::string::npos) {
+                std::string summary = r.substr(pos);
+                while (!summary.empty() && summary.back() == '\n') summary.pop_back();
+                std::cout << "    " << summary << '\n';
+            }
+        }
+    } else {
+        std::string preview = r.size() > 400 ? (r.substr(0, 400) + "...") : r;
+        std::string line;
+        for (char c : preview) {
+            if (c == '\n') { std::cout << "    " << line << '\n'; line.clear(); }
+            else line.push_back(c);
+        }
+        if (!line.empty()) std::cout << "    " << line << '\n';
     }
-    if (!line.empty()) std::cout << "    " << line << '\n';
     reset_color();
 }
 
@@ -433,7 +460,7 @@ TurnOutcome run_turn(http::Client& http, const llm::Provider& provider,
 
             print_tool_call(tc.function_name, tc.arguments);
             std::string result = tools::execute(tc.function_name, tc.arguments, cfg.root);
-            print_tool_result(result);
+            print_tool_result(result, tc.function_name);
             // Truncate tool results before feeding them back to the LLM
             // so that a huge read_file / run_command output does not
             // blow up the context window.
