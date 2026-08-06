@@ -109,6 +109,11 @@ inline ShellResult run_shell(std::string_view cmd, const fs::path& cwd, int time
     bool timed_out = false;
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeout_seconds);
 
+    // Open /dev/tty for real-time output mirroring to the user's terminal.
+    // The pipe captures everything for the agent, but the user also wants
+    // to see long-running command output (games, builds, etc.) in real-time.
+    int tty_fd = open("/dev/tty", O_WRONLY | O_CLOEXEC);
+
     while (true) {
         fd_set rfds;
         FD_ZERO(&rfds);
@@ -128,8 +133,14 @@ inline ShellResult run_shell(std::string_view cmd, const fs::path& cwd, int time
         ssize_t n = read(pipefd[0], chunk.data(), chunk.size());
         if (n <= 0) break;
         buf.append(chunk.data(), static_cast<size_t>(n));
+        // Mirror to the user's terminal so they can see real-time output
+        // from long-running commands (builds, games, etc.)
+        if (tty_fd >= 0) {
+            (void)write(tty_fd, chunk.data(), static_cast<size_t>(n));
+        }
     }
     close(pipefd[0]);
+    if (tty_fd >= 0) close(tty_fd);
 
     if (timed_out) {
         kill(pid, SIGKILL);
