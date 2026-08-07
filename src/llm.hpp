@@ -80,7 +80,8 @@ inline json::Value message_to_json(const Message& m) {
     if (m.content) obj["content"] = json::Value{*m.content};
     else if (m.role == "assistant") {
         if (!m.tool_calls.empty()) obj["content"] = json::Value{""};
-    } else if (m.role != "assistant") {
+        else obj["content"] = json::Value{""};  // fix: assistant without content or tool_calls
+    } else {
         obj["content"] = json::Value{""};
     }
     if (m.name) obj["name"] = json::Value{*m.name};
