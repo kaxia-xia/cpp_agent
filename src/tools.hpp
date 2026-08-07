@@ -2223,39 +2223,77 @@ inline std::string execute(const std::string& name, std::string_view arguments,
 
 
         // ── fetch_url ────────────────────────────────────────────────
-        // All external HTTP requests are routed through Jina Reader
-        // (https://r.jina.ai/) to obtain clean, reader-friendly markdown.
+        // Prefer Jina Reader (r.jina.ai) for clean markdown, but
+        // automatically fall back to direct connection when Jina is
+        // unreachable (VPN off, network issues, etc.).
         if (name == "fetch_url") {
             std::string url = get_str("url");
             if (url.empty()) return "[tool error: 'url' required]";
             int timeout = std::clamp(get_int("timeout", 30), 5, 120);
             size_t max_bytes = static_cast<size_t>(std::max(1024, get_int("max_bytes", 200000)));
 
-            // Route through Jina Reader for all http/https URLs that are
-            // not already going through r.jina.ai.
-            std::string fetch_url = url;
+            auto do_fetch = [&](const std::string& fetch_url) -> std::pair<std::string, std::string> {
+                std::string escaped;
+                for (char c : fetch_url) {
+                    if (c == '\'') escaped += "'\\''";
+                    else escaped.push_back(c);
+                }
+                std::string cmd = std::format("curl -sL --max-time {} '{}' 2>/dev/null || true",
+                                              timeout, escaped);
+                ShellResult r = run_shell(cmd, root, timeout + 10);
+
+                std::string status_cmd = std::format(
+                    "curl -sL -o /dev/null -w '%{{http_code}}' --max-time {} '{}' 2>/dev/null || echo '000'",
+                    timeout, escaped);
+                ShellResult status_r = run_shell(status_cmd, root, timeout + 10);
+                std::string code = status_r.output;
+                while (!code.empty() && (code.back() == '\n' || code.back() == '\r'))
+                    code.pop_back();
+                return {code, r.output};
+            };
+
+            auto is_bad = [](const std::string& status, const std::string& body) -> bool {
+                if (status.empty() || status == "000") return true;  // connection failure
+                if (body.empty()) return true;                        // empty response
+                int code = 0;
+                try { code = std::stoi(status); } catch (...) { return true; }
+                return code >= 400;                                   // 4xx / 5xx
+            };
+
+            std::string status_code, result;
             bool via_jina = false;
+            bool via_direct = false;
+
+            // ── Step 1: try Jina Reader ──────────────────────────
             if ((url.starts_with("http://") || url.starts_with("https://")) &&
                 url.find("r.jina.ai") == std::string::npos) {
-                fetch_url = "https://r.jina.ai/" + url;
-                via_jina = true;
+                std::string jina_url = "https://r.jina.ai/" + url;
+                auto [sc, body] = do_fetch(jina_url);
+                if (!is_bad(sc, body)) {
+                    status_code = sc;
+                    result = body;
+                    via_jina = true;
+                }
             }
 
-            std::string escaped_url;
-            for (char c : fetch_url) {
-                if (c == '\'') escaped_url += "'\\''";
-                else escaped_url.push_back(c);
+            // ── Step 2: fall back to direct ─────────────────────
+            if (result.empty() && !via_jina) {
+                // Jina not attempted (non-http URL) or Jina failed → try direct
+                auto [sc_d, body_d] = do_fetch(url);
+                status_code = sc_d;
+                result = body_d;
+                via_direct = !is_bad(sc_d, body_d);
+            } else if (via_jina && is_bad(status_code, result)) {
+                // Jina was tried but returned a bad response → fall back
+                auto [sc_d, body_d] = do_fetch(url);
+                if (!is_bad(sc_d, body_d)) {
+                    status_code = sc_d;
+                    result = body_d;
+                    via_jina = false;
+                    via_direct = true;
+                }
             }
-            std::string cmd = std::format("curl -sL --max-time {} '{}' 2>/dev/null || true", timeout, escaped_url);
-            ShellResult r = run_shell(cmd, root, timeout + 10);
 
-            std::string status_cmd = "curl -sL -o /dev/null -w '%{http_code}' --max-time " + std::to_string(timeout) + " '" + escaped_url + "' 2>/dev/null || echo '000'";
-            ShellResult status_r = run_shell(status_cmd, root, timeout + 10);
-            std::string status_code = status_r.output;
-            while (!status_code.empty() && (status_code.back() == '\n' || status_code.back() == '\r'))
-                status_code.pop_back();
-
-            std::string result = r.output;
             size_t total = result.size();
             if (result.size() > max_bytes) {
                 result = result.substr(0, max_bytes);
@@ -2263,7 +2301,8 @@ inline std::string execute(const std::string& name, std::string_view arguments,
 
             std::ostringstream ss;
             ss << std::format("[HTTP {} | {} bytes", status_code, total);
-            if (via_jina) ss << std::format(" | via Jina Reader (r.jina.ai)");
+            if (via_jina) ss << " | via Jina Reader (r.jina.ai)";
+            else if (via_direct) ss << " | direct (Jina unavailable, fell back)";
             if (total > max_bytes) ss << std::format(" (showing first {})", max_bytes);
             ss << "]\n";
             ss << result;
