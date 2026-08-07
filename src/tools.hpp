@@ -1443,7 +1443,12 @@ inline const LunarYear* find_lunar_year(int gyear) {
 }
 
 // ── Main entry: build_calendar(y, m, d) → formatted string ────────
+// The input (y, m, d) is in local time.  Solar-term crossings are
+// computed in UTC and then shifted by TZ_OFFSET so that displayed
+// dates match the local timezone (e.g. 大暑 at 2026-07-22 19:08 UTC
+// → 2026-07-23 in China / UTC+8).
 inline std::string build_calendar(int y, int m, int d) {
+    constexpr double TZ_OFFSET = 8.0 / 24.0;  // UTC+8 (China Standard Time)
     int q_serial = date_to_serial(y, m, d);
 
     // ── Determine the correct solar year ────────────────────────
@@ -1452,7 +1457,7 @@ inline std::string build_calendar(int y, int m, int d) {
     // at 春分 of year (y-1).
     double spr_eq_jd = jd_from_date(y, 3, 20);
     double spr_eq_cross = solar_term_crossing(spr_eq_jd, 0);
-    auto spr_eq_dt = jd_to_datetime(spr_eq_cross);
+    auto spr_eq_dt = jd_to_datetime(spr_eq_cross + TZ_OFFSET);
     int base_y = (q_serial < date_to_serial(spr_eq_dt.y, spr_eq_dt.m, spr_eq_dt.d)) ? y - 1 : y;
     // Use the actual computed 春分 JD as the base anchor, not the
     // fixed March-20 date.  This eliminates a ~0-1 day offset that
@@ -1463,7 +1468,7 @@ inline std::string build_calendar(int y, int m, int d) {
     // ── Compute all 24 solar term crossings ─────────────────────
     DateTime terms[24];
     for (int i = 0; i < 24; ++i) {
-        terms[i] = jd_to_datetime(solar_term_crossing(base_jd + i * 15.218, SOLAR_ANGLES[i]));
+        terms[i] = jd_to_datetime(solar_term_crossing(base_jd + i * 15.218, SOLAR_ANGLES[i]) + TZ_OFFSET);
     }
 
     // ── Find current and next term ──────────────────────────────
@@ -1477,7 +1482,7 @@ inline std::string build_calendar(int y, int m, int d) {
     // fall back to the last term of the previous cycle.
     if (cur_idx == -1) {
         cur_idx = 23;
-        terms[23] = jd_to_datetime(solar_term_crossing(jd_from_date(base_y-1, 3, 20) + 23*15.218, SOLAR_ANGLES[23]));
+        terms[23] = jd_to_datetime(solar_term_crossing(jd_from_date(base_y-1, 3, 20) + 23*15.218, SOLAR_ANGLES[23]) + TZ_OFFSET);
     }
 
     auto& cur = terms[cur_idx];
