@@ -47,6 +47,7 @@ TOOLS available (call via function/tool calling):
   - decompress(archive, output_dir?): extract archive.
   - weather(location?): query weather forecast.
   - get_datetime(format?): get current date and time in specified format.
+  - get_calendar(date?): get Chinese calendar info — solar term (节气), lunar date (农历), zodiac (生肖), heavenly stems & earthly branches (天干地支). Optionally query a specific date (YYYY-MM-DD).
   - plot_chart(chart_type, data_json, title?, output?): generate chart image.
   - create_image(path, width, height, color?, mode?): create a new blank image with specified dimensions and optional background color.
   - create_video(output, images, fps?, loop?, duration_per_image?): combine multiple images into a video file.

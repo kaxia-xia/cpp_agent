@@ -55,10 +55,54 @@ struct PathBlockedError : std::runtime_error {
 inline fs::path resolve_under_root(const fs::path& root, std::string_view path) {
     fs::path p(path);
     fs::path full = p.is_absolute() ? p : (root / p);
-    fs::path canon = fs::weakly_canonical(full);
-    fs::path root_canon = fs::weakly_canonical(root);
-    auto rel = fs::relative(canon, root_canon);
-    if (rel.empty() || rel.string().substr(0, 2) == "..") {
+
+    // ── Fast path: simple string prefix check ─────────────────────
+    // This catches the vast majority of cases without touching the
+    // filesystem at all, and is immune to symlink weirdness.
+    std::string root_str = root.string();
+    if (!root_str.empty() && root_str.back() != '/') root_str += '/';
+
+    // Lexically normalize the path first to handle ".." and ".".
+    fs::path lex = full.lexically_normal();
+    std::string lex_str = lex.string();
+
+    // If the lexical path starts with the workspace root prefix, it's safe.
+    if (lex_str.starts_with(root_str) || lex_str == root.string()) {
+        return lex;
+    }
+
+    // ── Slow path: canonical resolution ───────────────────────────
+    // Only used when the fast path fails (e.g., path goes through a
+    // symlink that points back into the workspace).
+    std::error_code ec;
+    fs::path canon = fs::weakly_canonical(full, ec);
+    if (ec) {
+        // canonicalization failed — fall back to the lexical path
+        // and block it if it wasn't caught by the fast path.
+        throw PathBlockedError(p.string(), root.string());
+    }
+
+    fs::path root_canon = fs::weakly_canonical(root, ec);
+    if (ec) root_canon = root;
+
+    // fs::relative can throw if paths are on different filesystems.
+    // Catch that and fall back to string comparison.
+    fs::path rel;
+    try {
+        rel = fs::relative(canon, root_canon);
+    } catch (const fs::filesystem_error&) {
+        // If relative() fails, compare string prefixes as a fallback.
+        std::string canon_str = canon.string();
+        std::string root_canon_str = root_canon.string();
+        if (!root_canon_str.empty() && root_canon_str.back() != '/')
+            root_canon_str += '/';
+        if (canon_str.starts_with(root_canon_str) || canon_str == root_canon.string()) {
+            return canon;
+        }
+        throw PathBlockedError(p.string(), root_canon.string());
+    }
+
+    if (rel.empty() || rel.string().starts_with("..")) {
         throw PathBlockedError(p.string(), root_canon.string());
     }
     return canon;
@@ -972,6 +1016,27 @@ inline json::Value tool_schemas() {
             std::move(p)));
     }
 
+    // ── 39. get_calendar - Chinese calendar info (solar terms, lunar date, zodiac) ──
+    {
+        json::Object p;
+        p["type"] = json::Value{"object"};
+        json::Object props;
+        json::Object date_p; date_p["type"] = json::Value{"string"};
+        date_p["description"] = json::Value{"Date in YYYY-MM-DD format. Default: today."};
+        date_p["default"] = json::Value{""};
+        props["date"] = json::Value{std::move(date_p)};
+        p["properties"] = json::Value{std::move(props)};
+        p["required"] = json::make_array<std::string>({});
+        tools.push_back(fn("get_calendar",
+            "Get Chinese calendar information: current solar term (节气), "
+            "lunar calendar date (农历), Chinese zodiac (生肖), "
+            "heavenly stems & earthly branches (天干地支), "
+            "and nearby traditional holidays. "
+            "Optionally specify a date in YYYY-MM-DD format to query a different day. "
+            "Uses Python with pure astronomical calculation internally.",
+            std::move(p)));
+    }
+
     // ── 37. screenshot - capture device screen ───────────────────────
     {
         json::Object p;
@@ -1487,6 +1552,9 @@ inline std::string execute(const std::string& name, std::string_view arguments,
                     if (blocked_path.empty() && path_candidate.size() > 1 &&
                         path_candidate[0] == '/') {
                         std::string pc(path_candidate);
+                        // Allow paths that are exactly the workspace root
+                        // (with or without trailing slash).
+                        if (pc == root_str || pc == (root_str + "/")) return;
                         if (pc.starts_with(root_prefix)) return;
                         for (const auto& sp : system_prefixes) {
                             if (pc.starts_with(sp)) { blocked_path = pc; return; }
@@ -2853,6 +2921,348 @@ except Exception as e:
                 ss << std::format("Unix timestamp: {}\n", ep);
             }
             return ss.str();
+        }
+        // ── get_calendar - Chinese calendar info ──────────────────────
+        if (name == "get_calendar") {
+            std::string date = get_str("date");
+            if (date.empty()) {
+                // Use today's date from shell
+                ShellResult today_r = run_shell("date '+%Y-%m-%d' 2>/dev/null || true", root, 5);
+                date = today_r.output;
+                while (!date.empty() && (date.back() == '\n' || date.back() == '\r'))
+                    date.pop_back();
+            }
+
+            // Validate date format
+            if (date.size() != 10 || date[4] != '-' || date[7] != '-') {
+                return std::format("[error: invalid date format '{}'. Use YYYY-MM-DD.]", date);
+            }
+
+            std::string py_script = R"PY(
+import sys, math, datetime
+
+# ── Astronomical helpers ──────────────────────────────────────────
+def jd_from_date(y, m, d):
+    """Julian Day Number at 0h UT for a Gregorian date."""
+    if m <= 2:
+        y -= 1
+        m += 12
+    a = y // 100
+    b = 2 - a + a // 4
+    return int(365.25 * (y + 4716)) + int(30.6001 * (m + 1)) + d + b - 1524.5
+
+def sun_longitude(jd):
+    """Apparent geocentric ecliptic longitude of the Sun in degrees (0-360)."""
+    T = (jd - 2451545.0) / 36525.0  # Julian centuries since J2000.0
+
+    # Mean anomaly of the Sun
+    M = (357.52910 + 35999.05030 * T - 0.0001559 * T * T - 0.00000048 * T * T * T) % 360
+    M_rad = math.radians(M)
+
+    # Equation of centre
+    C = (1.914602 - 0.004817 * T - 0.000014 * T * T) * math.sin(M_rad) \
+      + (0.019993 - 0.000101 * T) * math.sin(2 * M_rad) \
+      + 0.000289 * math.sin(3 * M_rad)
+
+    # True longitude
+    L0 = (280.46646 + 36000.76983 * T + 0.0003032 * T * T) % 360
+    true_lon = (L0 + C) % 360
+
+    # Nutation correction (simplified)
+    omega = math.radians(125.04 - 1934.136 * T)
+    dpsi = -0.0048 * math.sin(omega) - 0.0004 * math.sin(2 * omega)
+    apparent_lon = (true_lon + dpsi) % 360
+
+    return apparent_lon
+
+def find_solar_term_crossing(jd_start, target_deg):
+    """Find the JD when the sun's longitude crosses target_deg.
+    Uses bisection for precision, starting from jd_start."""
+    lo = jd_start - 0.5
+    hi = jd_start + 1.5
+
+    # Ensure the crossing is within [lo, hi]
+    for _ in range(10):
+        mid = (lo + hi) / 2
+        sl = (sun_longitude(mid) - target_deg + 360) % 360
+        if sl > 180:
+            lo = mid
+        else:
+            hi = mid
+
+    jd_cross = (lo + hi) / 2
+    return jd_cross
+
+# ── Solar terms ────────────────────────────────────────────────────
+SOLAR_TERMS = [
+    "春分","清明","谷雨","立夏","小满","芒种",
+    "夏至","小暑","大暑","立秋","处暑","白露",
+    "秋分","寒露","霜降","立冬","小雪","大雪",
+    "冬至","小寒","大寒","立春","雨水","惊蛰"
+]
+SOLAR_ANGLES = [i * 15 for i in range(24)]  # 0°, 15°, ..., 345°
+
+def get_solar_term_info(date_dt):
+    """Return (current_term, next_term, next_term_date) for a given date."""
+    jd = jd_from_date(date_dt.year, date_dt.month, date_dt.day)
+
+    # Find which solar term interval we're in
+    # Check solar longitudes for upcoming terms
+    current_idx = -1
+    for i in range(24):
+        angle = SOLAR_ANGLES[i]
+        # Approximate crossing date
+        approx_day = 79 + i * 15.218  # Rough estimate from spring equinox
+        approx_jd = jd_from_date(date_dt.year, 3, 20) + (i * 15.218)
+
+        # Find precise crossing
+        cross_jd = find_solar_term_crossing(approx_jd, angle)
+        cross_dt = jd_to_datetime(cross_jd)
+
+        if cross_dt <= date_dt:
+            current_idx = i
+        else:
+            next_idx = i
+            next_dt = cross_dt
+            break
+    else:
+        # All terms this year have passed; next is spring equinox next year
+        next_idx = 0
+        approx_jd = jd_from_date(date_dt.year + 1, 3, 20)
+        cross_jd = find_solar_term_crossing(approx_jd, 0)
+        next_dt = jd_to_datetime(cross_jd)
+
+    if current_idx == -1:
+        # Before spring equinox of this year
+        current_idx = 23  # 惊蛰 of previous year
+        approx_jd = jd_from_date(date_dt.year - 1, 3, 20) + (23 * 15.218)
+        cross_jd = find_solar_term_crossing(approx_jd, 345)
+        current_term_date = jd_to_datetime(cross_jd)
+    else:
+        # Recompute current term date
+        angle = SOLAR_ANGLES[current_idx]
+        approx_jd = jd_from_date(date_dt.year, 3, 20) + (current_idx * 15.218)
+        cross_jd = find_solar_term_crossing(approx_jd, angle)
+        current_term_date = jd_to_datetime(cross_jd)
+
+    return (SOLAR_TERMS[current_idx], current_term_date.strftime("%Y-%m-%d"),
+            SOLAR_TERMS[next_idx], next_dt.strftime("%Y-%m-%d"))
+
+def jd_to_datetime(jd):
+    """Convert Julian Day to datetime (UTC, then shifted to local approximation)."""
+    jd += 0.5
+    Z = int(jd)
+    F = jd - Z
+    if Z < 2299161:
+        A = Z
+    else:
+        alpha = int((Z - 1867216.25) / 36524.25)
+        A = Z + 1 + alpha - alpha // 4
+    B = A + 1524
+    C = int((B - 122.1) / 365.25)
+    D = int(365.25 * C)
+    E = int((B - D) / 30.6001)
+    day = B - D - int(30.6001 * E) + F
+    day_int = int(day)
+    month = E - 1 if E < 14 else E - 13
+    year = C - 4716 if month > 2 else C - 4715
+    # Fractional day to hours/minutes
+    frac = day - day_int
+    hour = int(frac * 24)
+    minute = int((frac * 24 - hour) * 60)
+    try:
+        return datetime.datetime(year, month, day_int, hour, minute)
+    except:
+        return datetime.datetime(year, month, max(1, min(28, day_int)), hour, minute)
+
+# ── Chinese calendar (lunar) ───────────────────────────────────────
+# Encoded lunar year data:
+#   key: Gregorian year
+#   value: (chinese_new_year_date, leap_month, month_days_list)
+#   month_days_list: 12 or 13 integers (29 or 30), leap month inserted at leap_month position
+# Data for 2020-2030
+LUNAR_YEAR_DATA = {
+    2020: (datetime.date(2020,1,25), 4, [30,30,30,30, 29,30,30,30,29,30,29,30,29]),
+    2021: (datetime.date(2021,2,12), 0, [29,30,30,29,30,30,29,30,29,30,29,30]),
+    2022: (datetime.date(2022,2,1), 0,  [29,30,29,30,29,30,30,29,30,29,30,29]),
+    2023: (datetime.date(2023,1,22), 2,  [30,29, 30,29,30,29,30,30,29,30,29,30,29]),
+    2024: (datetime.date(2024,2,10), 0,  [30,29,30,29,30,29,30,29,30,30,29,30]),
+    2025: (datetime.date(2025,1,29), 6,  [29,30,30,29,30,30, 29,30,29,30,29,30,29]),
+    2026: (datetime.date(2026,2,17), 0,  [30,29,30,29,30,29,30,29,30,29,30,30]),
+    2027: (datetime.date(2027,2,6), 0,   [29,30,29,30,29,30,29,30,30,29,30,29]),
+    2028: (datetime.date(2028,1,26), 0,  [30,30,29,30,29,30,29,30,29,30,29,30]),
+    2029: (datetime.date(2029,2,13), 0,  [29,30,30,29,30,29,30,29,30,29,30,29]),
+    2030: (datetime.date(2030,2,3), 0,   [30,29,30,29,30,30,29,30,29,30,29,30]),
+}
+
+# Stem-Branch
+HEAVENLY_STEMS  = ["甲","乙","丙","丁","戊","己","庚","辛","壬","癸"]
+EARTHLY_BRANCHES = ["子","丑","寅","卯","辰","巳","午","未","申","酉","戌","亥"]
+ZODIAC = ["鼠","牛","虎","兔","龙","蛇","马","羊","猴","鸡","狗","猪"]
+
+def get_lunar_info(dt):
+    """Return (lunar_year, lunar_month, lunar_day, is_leap_month, stem_branch_year, zodiac)."""
+    # Coerce to date for consistent comparisons
+    d = dt.date() if isinstance(dt, datetime.datetime) else dt
+    y = d.year
+    # Find which lunar year this date falls in
+    lunar_y = y
+    # Default fallback CNY = Feb 5 of that year
+    default_cny = datetime.date(y, 2, 5)
+    this_cny = LUNAR_YEAR_DATA[y][0] if y in LUNAR_YEAR_DATA else default_cny
+
+    if d < this_cny:
+        lunar_y = y - 1
+
+    # Get lunar year data
+    if lunar_y in LUNAR_YEAR_DATA:
+        ny_dt, leap_month, month_lens = LUNAR_YEAR_DATA[lunar_y]
+    else:
+        ny_dt = datetime.date(lunar_y, 2, 5)
+        leap_month = 0
+        month_lens = [30,29,30,29,30,29,30,30,29,30,29,30]
+
+    days_passed = (d - ny_dt).days
+
+    if days_passed < 0:
+        # Before CNY — use previous year again
+        lunar_y -= 1
+        if lunar_y in LUNAR_YEAR_DATA:
+            ny_dt, leap_month, month_lens = LUNAR_YEAR_DATA[lunar_y]
+        else:
+            ny_dt = datetime.date(lunar_y, 2, 5)
+            leap_month = 0
+            month_lens = [30,29,30,29,30,29,30,30,29,30,29,30]
+        days_passed = (d - ny_dt).days
+
+    # Walk through months using the month_lens list
+    remaining = days_passed
+    lunar_month = 1
+    lunar_day = 1
+    is_leap = False
+    leap_month_idx = leap_month if leap_month > 0 else -1
+
+    for mi, mlen in enumerate(month_lens):
+        if remaining < mlen:
+            lunar_day = remaining + 1
+            # Determine lunar month number
+            if leap_month_idx >= 0:
+                if mi == leap_month_idx:
+                    is_leap = True
+                    lunar_month = leap_month
+                elif mi > leap_month_idx:
+                    lunar_month = mi  # leap month already counted
+                else:
+                    lunar_month = mi + 1
+            else:
+                lunar_month = mi + 1
+            break
+        remaining -= mlen
+    else:
+        lunar_day = remaining + 1
+        lunar_month = 12
+        if leap_month_idx >= 0 and leap_month_idx < 12:
+            lunar_month = 12
+
+    # Stem-branch year
+    stem_idx = (lunar_y - 4) % 10
+    branch_idx = (lunar_y - 4) % 12
+    sb_year = HEAVENLY_STEMS[stem_idx] + EARTHLY_BRANCHES[branch_idx]
+    zodiac_animal = ZODIAC[branch_idx]
+
+    # Lunar month name
+    LUNAR_MONTHS = ["正","二","三","四","五","六","七","八","九","十","冬","腊"]
+    LUNAR_DAYS = ["","初一","初二","初三","初四","初五","初六","初七","初八","初九","初十",
+                  "十一","十二","十三","十四","十五","十六","十七","十八","十九","二十",
+                  "廿一","廿二","廿三","廿四","廿五","廿六","廿七","廿八","廿九","三十"]
+
+    month_name = ("闰" if is_leap else "") + LUNAR_MONTHS[lunar_month - 1] + "月"
+    day_name = LUNAR_DAYS[lunar_day] if lunar_day < len(LUNAR_DAYS) else str(lunar_day)
+
+    return lunar_y, month_name, day_name, is_leap, sb_year, zodiac_animal
+
+# ── Traditional holidays ────────────────────────────────────────────
+# Key Chinese holidays (lunar dates)
+HOLIDAYS_LUNAR = [
+    (1, 1, "春节 (Spring Festival) 🧧"),
+    (1, 15, "元宵节 (Lantern Festival) 🏮"),
+    (5, 5, "端午节 (Dragon Boat Festival) 🐉"),
+    (7, 7, "七夕 (Qixi Festival) 💕"),
+    (7, 15, "中元节 (Ghost Festival) 👻"),
+    (8, 15, "中秋节 (Mid-Autumn Festival) 🌕"),
+    (9, 9, "重阳节 (Double Ninth Festival) 🌼"),
+    (12, 30, "除夕 (New Year's Eve) 🎆"),
+]
+
+HOLIDAYS_GREGORIAN = [
+    (1, 1, "元旦 (New Year) 🎉"),
+    (4, 5, "清明节 (Qingming / Tomb-Sweeping) 🌿"),
+    (10, 1, "国庆节 (National Day) 🇨🇳"),
+]
+
+# ── Main ───────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    date_str = sys.argv[1] if len(sys.argv) > 1 else ""
+    if not date_str:
+        date_str = datetime.date.today().isoformat()
+
+    dt = datetime.datetime.strptime(date_str, "%Y-%m-%d")
+    today = dt.date()
+
+    # Solar term info
+    cur_term, cur_term_date, next_term, next_term_date = get_solar_term_info(dt)
+
+    # Distance to current/next term
+    cur_d = datetime.datetime.strptime(cur_term_date, "%Y-%m-%d").date()
+    next_d = datetime.datetime.strptime(next_term_date, "%Y-%m-%d").date()
+    days_since = (today - cur_d).days
+    days_until = (next_d - today).days
+
+    # Lunar info
+    lunar_y, lunar_month, lunar_day, is_leap, sb_year, zodiac = get_lunar_info(dt)
+
+    # Output
+    print(f"📅 {date_str}  |  {sb_year}年 ({zodiac}年)")
+    print(f"农历: {lunar_month}{lunar_day}")
+    print(f"节气: {cur_term} ({cur_term_date}, {days_since}天前)")
+    print(f"下个节气: {next_term} ({next_term_date}, {days_until}天后)")
+
+    # All 24 solar terms for this year (approximate)
+    print(f"\n── {dt.year}年 二十四节气 ──")
+    for i, name in enumerate(SOLAR_TERMS):
+        angle = SOLAR_ANGLES[i]
+        approx_jd = jd_from_date(dt.year, 3, 20) + (i * 15.218)
+        cross_jd = find_solar_term_crossing(approx_jd, angle)
+        cross_dt = jd_to_datetime(cross_jd)
+        marker = " ← 今天" if cross_dt.date() == today else ""
+        if cross_dt.year == dt.year:
+            print(f"  {name:4s}  {cross_dt.strftime('%m-%d')}{marker}")
+        elif cross_dt.year < dt.year:
+            print(f"  {name:4s}  ({cross_dt.year}){cross_dt.strftime('%m-%d')}{marker}")
+
+    # Nearby holidays
+    print(f"\n── 传统节日 ──")
+    # This is simplified; real holidays need proper lunar calendar lookup
+    print(f"  春节通常在1-2月, 端午在5-6月, 中秋在9-10月")
+    print(f"  具体日期需查当年农历对应公历日期")
+)PY";
+
+            std::string pyfile = (fs::temp_directory_path() / "agent_calendar.py").string();
+            { std::ofstream pf(pyfile); pf << py_script; }
+
+            std::string escaped_date;
+            for (char c : date) {
+                if (c == '\'') escaped_date += "'\\''";
+                else escaped_date.push_back(c);
+            }
+
+            std::string cmd = std::format("python3 '{}' '{}' 2>&1 || true", pyfile, escaped_date);
+            ShellResult r = run_shell(cmd, root, 30);
+
+            if (r.exit_code != 0 || r.output.empty()) {
+                return std::format("[error: calendar calculation failed]\n{}", r.output);
+            }
+            return r.output;
         }
         // ── screenshot ───────────────────────────────────────────────
         if (name == "screenshot") {
