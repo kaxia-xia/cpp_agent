@@ -1370,9 +1370,15 @@ inline double sun_longitude(double jd) {
 }
 
 // ── Find the JD when sun_longitude crosses target_deg (bisection) ─
+// Search window: ±4 days around the approximation.  The Earth's
+// elliptical orbit causes solar terms to vary between ~14.7 and
+// ~15.7 days apart, so the accumulated error from using a fixed
+// average spacing (15.218) can reach several days by late summer.
+// A 4-day window safely covers the worst case without being wide
+// enough to accidentally capture the wrong crossing.
 inline double solar_term_crossing(double jd_approx, int target_deg) {
-    double lo = jd_approx - 0.5;
-    double hi = jd_approx + 1.5;
+    double lo = jd_approx - 4.0;
+    double hi = jd_approx + 4.0;
     for (int i = 0; i < 20; ++i) {
         double mid = (lo + hi) * 0.5;
         double sl = std::fmod(sun_longitude(mid) - target_deg + 360.0, 360.0);
@@ -1448,7 +1454,11 @@ inline std::string build_calendar(int y, int m, int d) {
     double spr_eq_cross = solar_term_crossing(spr_eq_jd, 0);
     auto spr_eq_dt = jd_to_datetime(spr_eq_cross);
     int base_y = (q_serial < date_to_serial(spr_eq_dt.y, spr_eq_dt.m, spr_eq_dt.d)) ? y - 1 : y;
-    double base_jd = jd_from_date(base_y, 3, 20);
+    // Use the actual computed 春分 JD as the base anchor, not the
+    // fixed March-20 date.  This eliminates a ~0-1 day offset that
+    // otherwise compounds with the uneven term spacing.
+    double base_jd = (base_y == y) ? spr_eq_cross
+                                   : solar_term_crossing(jd_from_date(base_y, 3, 20), 0);
 
     // ── Compute all 24 solar term crossings ─────────────────────
     DateTime terms[24];
