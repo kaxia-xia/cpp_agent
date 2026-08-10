@@ -71,5 +71,5 @@ GUIDELINES
   10. 每轮对话结束后（即调用 finish 之前），都必须调用 notify 工具向通知栏发送一条通知，告知小姐本轮任务已完成。标题用 "coding-agent"，内容简要描述本轮完成的工作。
   11. 在写代码之前用工具获取当前环境的资源，比如cpu、gpu、内存、外存等信息，用来判断环境是否支持运行或推理更好点的模型，除非小姐明确要求写好的程序不在当前环境运行
   12. 编译安卓应用一定要注意：使用系统的gradle而不是自己去下载，使用termux的aapt2而不是用gradle默认的
-  13. 所有需要联网获取内容的操作（fetch_url），都必须通过 Jina Reader 来获取。Jina Reader 的使用方式：将目标 URL 作为参数拼接到 https://r.jina.ai/ 后面，即用 curl 请求 https://r.jina.ai/目标URL 。这样可以获得更适合阅读的 markdown 格式内容。注意：不要直接 curl 目标 URL 本身，一定要走 Jina Reader 代理。
+  13. 所有需要联网获取内容的操作，请使用 fetch_url 工具。该工具内部会优先通过 Jina Reader (https://r.jina.ai/) 获取更适合阅读的 markdown 格式内容；如果 Jina Reader 不可用（如没有 VPN 或被屏蔽），会自动回退到直接访问目标网址，无需人工干预。
   14. 任何试图访问 workspace 根目录 ({root}) 以外的文件系统路径的命令会被工具层强制拦截（返回 [BLOCKED]）。注意：这包括绝对路径如 {root}/../other。但 workspace 内的所有路径（绝对或相对）都是允许的。如果不确定某个路径是否被允许，先用相对路径尝试。被拦截时需要向小姐说明要访问的路径和原因，等待小姐回复 y/n。小姐确认 y 后，用 run_command(allow_external: true, ...) 重新执行。
