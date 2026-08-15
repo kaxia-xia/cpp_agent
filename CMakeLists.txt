@@ -69,41 +69,50 @@ endif()
 
 # ── libcurl ─────────────────────────────────────────────────────────
 # Lookup priority:
-#   1. project-local third_party/curl-windows  (Windows only;
-#      populate it by running scripts/setup_curl_windows.ps1)
+#   1. project-local third_party/curl-windows  (Windows only; shipped in
+#      the zip or fetched by scripts/setup_curl_windows.ps1)
 #   2. find_package(CURL) — pkg-config (Linux/Termux) or vcpkg (Windows)
 #   3. manual find_path/find_library fallback (standalone MinGW libcurl)
-if(WIN32)
-    set(_curl_local "${CMAKE_CURRENT_SOURCE_DIR}/third_party/curl-windows")
-    if(EXISTS "${_curl_local}/include/curl/curl.h")
-        message(STATUS "Using project-local libcurl: ${_curl_local}")
-        list(PREPEND CMAKE_PREFIX_PATH "${_curl_local}")
-    endif()
-endif()
-
-find_package(CURL QUIET)
-if(NOT CURL_FOUND)
-    if(WIN32)
-        find_path(CURL_INCLUDE_DIR NAMES curl/curl.h HINTS "${_curl_local}/include")
-        find_library(CURL_LIBRARY NAMES curl libcurl libcurl_imp curl_imp HINTS "${_curl_local}/lib")
-    else()
-        find_path(CURL_INCLUDE_DIR NAMES curl/curl.h)
-        find_library(CURL_LIBRARY NAMES curl libcurl libcurl_imp curl_imp)
-    endif()
-    if(CURL_INCLUDE_DIR AND CURL_LIBRARY)
-        message(STATUS "libcurl found manually: ${CURL_LIBRARY}")
-        add_library(CURL::libcurl UNKNOWN IMPORTED)
-        set_target_properties(CURL::libcurl PROPERTIES
-            IMPORTED_LOCATION "${CURL_LIBRARY}"
-            INTERFACE_INCLUDE_DIRECTORIES "${CURL_INCLUDE_DIR}")
-        set(CURL_FOUND TRUE)
+#
+# Windows local package uses the *import library* (libcurl.dll.a) so the
+# exe links dynamically against libcurl-x64.dll; that DLL is copied next to
+# coding-agent.exe at build time (no static dependency chain to maintain).
+set(_curl_local "${CMAKE_CURRENT_SOURCE_DIR}/third_party/curl-windows")
+if(WIN32 AND EXISTS "${_curl_local}/include/curl/curl.h")
+    message(STATUS "Using project-local libcurl: ${_curl_local}")
+    set(CURL_INCLUDE_DIR "${_curl_local}/include")
+    set(CURL_LIBRARY "${_curl_local}/lib/libcurl.dll.a")
+    set(_curl_local_dll "${_curl_local}/bin/libcurl-x64.dll")
+    add_library(CURL::libcurl UNKNOWN IMPORTED)
+    set_target_properties(CURL::libcurl PROPERTIES
+        IMPORTED_LOCATION "${CURL_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${CURL_INCLUDE_DIR}")
+    set(CURL_FOUND TRUE)
+else()
+    find_package(CURL QUIET)
+    if(NOT CURL_FOUND)
+        if(WIN32)
+            find_path(CURL_INCLUDE_DIR NAMES curl/curl.h HINTS "${_curl_local}/include")
+            find_library(CURL_LIBRARY NAMES curl libcurl libcurl_imp curl_imp HINTS "${_curl_local}/lib")
+        else()
+            find_path(CURL_INCLUDE_DIR NAMES curl/curl.h)
+            find_library(CURL_LIBRARY NAMES curl libcurl libcurl_imp curl_imp)
+        endif()
+        if(CURL_INCLUDE_DIR AND CURL_LIBRARY)
+            message(STATUS "libcurl found manually: ${CURL_LIBRARY}")
+            add_library(CURL::libcurl UNKNOWN IMPORTED)
+            set_target_properties(CURL::libcurl PROPERTIES
+                IMPORTED_LOCATION "${CURL_LIBRARY}"
+                INTERFACE_INCLUDE_DIRECTORIES "${CURL_INCLUDE_DIR}")
+            set(CURL_FOUND TRUE)
+        endif()
     endif()
 endif()
 if(NOT CURL_FOUND)
     message(FATAL_ERROR
         "libcurl development files not found (need curl/curl.h + linkable libcurl).\n"
-        "  Windows (recommended): run scripts\\setup_curl_windows.ps1 to fetch the\n"
-        "    official curl package into third_party/curl-windows (auto-detected).\n"
+        "  Windows: put the official curl package under third_party/curl-windows\n"
+        "    (or run scripts\\setup_curl_windows.ps1).\n"
         "  Or use vcpkg:\n"
         "    MSVC:   vcpkg install curl:x64-windows\n"
         "    MinGW:  vcpkg install curl:x64-mingw-static\n"
@@ -118,6 +127,16 @@ add_executable(coding-agent
 )
 target_include_directories(coding-agent PRIVATE src)
 target_link_libraries(coding-agent PRIVATE CURL::libcurl Threads::Threads)
+
+# Windows: copy the libcurl DLL next to the executable so it runs without
+# adding anything to PATH (we link against libcurl.dll.a import library).
+if(WIN32 AND _curl_local_dll AND EXISTS "${_curl_local_dll}")
+    add_custom_command(TARGET coding-agent POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${_curl_local_dll}"
+                "$<TARGET_FILE_DIR:coding-agent>"
+        COMMENT "Copying libcurl-x64.dll next to coding-agent.exe")
+endif()
 
 # Help locate shared libs at runtime on Termux (loader already searches
 # $PREFIX/lib, but be explicit in case of cross-prefix installs).

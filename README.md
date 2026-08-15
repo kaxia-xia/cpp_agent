@@ -494,11 +494,11 @@ cmake --install build --prefix /usr/local
 
 以下适用于 **Windows 10/11 x64**。全程使用 **纯 Windows 原生工具链**，不依赖 MSYS2 / Cygwin / WSL 等任何类 Unix 环境。两条路线可选：**MinGW-w64（WinLibs）** 或 **MSVC（Visual Studio Build Tools）**。
 
-### 方案一：MinGW-w64（WinLibs）+ 一键脚本（推荐，最简单）
+### 方案一：MinGW-w64（WinLibs）+ 项目自带 libcurl（推荐，零下载）
 
 > WinLibs 是 **MinGW-w64 GCC 的独立便携发行版**（解压即用，只含 `g++`/`gcc`/`windres`/`gdb`/`mingw32-make` 等编译器与工具，**不含 libcurl**）。它本质是原生的 Windows 程序，生成的原生 `.exe` 不依赖任何 POSIX 层。
 >
-> libcurl 用 **curl 官方 Windows 包** 补齐——curl-for-win 官方 README 明确说明该包包含 `curl.exe`、`libcurl` DLL 以及**静态库（Static libraries）**，MinGW 可直接链接，无需 vcpkg 或从源码编译。项目内置了一键脚本自动完成下载与放置。
+> **libcurl 已随本项目附带**在 `third_party/curl-windows/`（curl 官方 Windows 包，含 `include/curl/*.h`、`lib/libcurl.dll.a` 导入库、`bin/libcurl-x64.dll`）。CMake 会自动找到它，**无需下载、无需 vcpkg、无需配置路径**。
 
 1. 下载 [WinLibs](https://winlibs.com/) 的 **GCC x86_64 UCRT 运行时** 便携版（`.zip` 或 `.7z`），解压到 `C:\mingw64`（解压后应有 `C:\mingw64\bin\g++.exe`），并把 `C:\mingw64\bin` 加入 **PATH**：
 
@@ -509,24 +509,16 @@ setx PATH "C:\mingw64\bin;%PATH%"
 
 2. 安装 [CMake](https://cmake.org/download/) 和 [Ninja](https://ninja-build.org/)（解压加 PATH）。
 
-3. 在项目根目录运行一键脚本，自动下载并放置 libcurl 开发文件到 `third_party/curl-windows/`：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\setup_curl_windows.ps1
-```
-
-4. 编译项目（**cmd 或 PowerShell** 均可，CMake 会自动找到 `third_party/curl-windows`）：
+3. 编译项目（**cmd 或 PowerShell** 均可，CMake 自动找到项目内 libcurl 并自动把 `libcurl-x64.dll` 复制到 exe 旁）：
 
 ```cmd
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-产物为 `build\coding-agent.exe`。
+产物为 `build\coding-agent.exe`（同目录已有 `libcurl-x64.dll`，可直接运行）。
 
-> 💡 脚本下载的是 curl 官方 `win64-mingw.zip`，解压后把 `include/`、`lib/`、`bin/` 放到 `third_party/curl-windows/`。CMake 的 `_curl_local` 查找逻辑会自动定位，无需 `-DCMAKE_PREFIX_PATH`。
->
-> ⚠️ 若编译出的 `coding-agent.exe` 启动时提示找不到 `libcurl-*.dll`，说明链接的是动态导入库——把 `third_party\curl-windows\bin\libcurl-*.dll` 复制到 `coding-agent.exe` 同目录即可。
+> 💡 若 `third_party/curl-windows/` 丢失（例如从 git 重新 clone），可运行 `powershell -ExecutionPolicy Bypass -File scripts\setup_curl_windows.ps1` 重新下载补齐。
 
 ### 方案二：MinGW-w64 + vcpkg（备选，需从源码编译）
 
