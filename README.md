@@ -494,11 +494,11 @@ cmake --install build --prefix /usr/local
 
 以下适用于 **Windows 10/11 x64**。全程使用 **纯 Windows 原生工具链**，不依赖 MSYS2 / Cygwin / WSL 等任何类 Unix 环境。两条路线可选：**MinGW-w64（WinLibs）** 或 **MSVC（Visual Studio Build Tools）**。
 
-### 方案一：MinGW-w64（WinLibs）+ 官方 curl 包（推荐，最简单）
+### 方案一：MinGW-w64（WinLibs）+ 一键脚本（推荐，最简单）
 
 > WinLibs 是 **MinGW-w64 GCC 的独立便携发行版**（解压即用，只含 `g++`/`gcc`/`windres`/`gdb`/`mingw32-make` 等编译器与工具，**不含 libcurl**）。它本质是原生的 Windows 程序，生成的原生 `.exe` 不依赖任何 POSIX 层。
 >
-> libcurl 用 **curl 官方 Windows 包** 补齐——curl-for-win 官方 README 明确说明该包包含 `curl.exe`、`libcurl` DLL 以及**静态库（Static libraries）**，MinGW 可直接链接，无需 vcpkg 或从源码编译。
+> libcurl 用 **curl 官方 Windows 包** 补齐——curl-for-win 官方 README 明确说明该包包含 `curl.exe`、`libcurl` DLL 以及**静态库（Static libraries）**，MinGW 可直接链接，无需 vcpkg 或从源码编译。项目内置了一键脚本自动完成下载与放置。
 
 1. 下载 [WinLibs](https://winlibs.com/) 的 **GCC x86_64 UCRT 运行时** 便携版（`.zip` 或 `.7z`），解压到 `C:\mingw64`（解压后应有 `C:\mingw64\bin\g++.exe`），并把 `C:\mingw64\bin` 加入 **PATH**：
 
@@ -507,29 +507,26 @@ set PATH=C:\mingw64\bin;%PATH%
 setx PATH "C:\mingw64\bin;%PATH%"
 ```
 
-2. 下载 curl 官方 Windows 包（含 libcurl 开发文件）：
+2. 安装 [CMake](https://cmake.org/download/) 和 [Ninja](https://ninja-build.org/)（解压加 PATH）。
 
-- 固定地址（总是最新版）：https://curl.se/windows/latest.cgi?p=win64-mingw.zip
-- 或指定版本：https://curl.se/windows/dl-8.21.0_7/curl-8.21.0_7-win64-mingw.zip
+3. 在项目根目录运行一键脚本，自动下载并放置 libcurl 开发文件到 `third_party/curl-windows/`：
 
-3. 解压到 `C:\curl`，确认目录结构（关键文件必须存在）：
-
-```cmd
-C:\curl\include\curl\curl.h      ← 头文件
-C:\curl\lib\libcurl.a            ← 静态库（或 libcurl.dll.a 导入库）
-C:\curl\bin\curl.exe             ← 命令行工具（顺带）
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup_curl_windows.ps1
 ```
 
-4. 编译项目（**cmd 或 PowerShell** 均可）：
+4. 编译项目（**cmd 或 PowerShell** 均可，CMake 会自动找到 `third_party/curl-windows`）：
 
 ```cmd
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/curl
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
 产物为 `build\coding-agent.exe`。
 
-> 💡 `-DCMAKE_PREFIX_PATH=C:/curl` 让 CMake 在 `C:\curl\include` 与 `C:\curl\lib` 下找到 libcurl（本项目的 CMake 已内置 fallback 查找逻辑，无需 pkg-config）。若链接时报找不到 DLL，说明用的是动态导入库，改用静态库即可：把 `-DCMAKE_PREFIX_PATH=C:/curl` 保留，并确认 `C:\curl\lib\libcurl.a` 存在。
+> 💡 脚本下载的是 curl 官方 `win64-mingw.zip`，解压后把 `include/`、`lib/`、`bin/` 放到 `third_party/curl-windows/`。CMake 的 `_curl_local` 查找逻辑会自动定位，无需 `-DCMAKE_PREFIX_PATH`。
+>
+> ⚠️ 若编译出的 `coding-agent.exe` 启动时提示找不到 `libcurl-*.dll`，说明链接的是动态导入库——把 `third_party\curl-windows\bin\libcurl-*.dll` 复制到 `coding-agent.exe` 同目录即可。
 
 ### 方案二：MinGW-w64 + vcpkg（备选，需从源码编译）
 
@@ -827,6 +824,11 @@ cpp_agent/
 ├── CMakeLists.txt        # 构建配置（C++20，libcurl，Termux 探测，一键安装）
 ├── build/
 │   └── coding-agent      # 编译产物
+├── scripts/
+│   └── setup_curl_windows.ps1   # Windows：一键下载 libcurl 到 third_party/
+├── third_party/
+│   ├── README.md         # third_party 说明
+│   └── curl-windows/     # Windows libcurl 开发文件（脚本生成，gitignore）
 └── src/
     ├── main.cpp          # 入口：参数解析、REPL、Agent 循环、系统提示词、终端流控制
     ├── llm.hpp           # OpenAI 兼容 chat-completion 客户端 + tool calling
@@ -835,7 +837,8 @@ cpp_agent/
     ├── git.hpp           # Git 集成：可用性检查、仓库初始化、自动提交
     ├── http.hpp          # libcurl 轻量封装（JSON POST / Bearer 鉴权）
     ├── json.hpp          # 自包含 JSON 值/解析器/序列化器（无外部依赖）
-    └── markdown.hpp      # Markdown → 终端 ANSI 渲染器
+    ├── markdown.hpp      # Markdown → 终端 ANSI 渲染器
+    └── platform.hpp      # 跨平台抽象（TTY/信号/时间/终端宽度/exe 目录）
 ```
 
 ---

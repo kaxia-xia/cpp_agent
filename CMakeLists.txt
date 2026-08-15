@@ -68,14 +68,28 @@ if(NOT WIN32)
 endif()
 
 # ── libcurl ─────────────────────────────────────────────────────────
-# find_package(CURL) works out-of-the-box with pkg-config-based systems
-# (Linux/Termux) and vcpkg (Windows MSVC / MinGW triplets).  But a standalone
-# MinGW libcurl install often has no CMake config file, so fall back to a
-# manual header+library search (the name `curl` matches `libcurl.dll.a`).
+# Lookup priority:
+#   1. project-local third_party/curl-windows  (Windows only;
+#      populate it by running scripts/setup_curl_windows.ps1)
+#   2. find_package(CURL) — pkg-config (Linux/Termux) or vcpkg (Windows)
+#   3. manual find_path/find_library fallback (standalone MinGW libcurl)
+if(WIN32)
+    set(_curl_local "${CMAKE_CURRENT_SOURCE_DIR}/third_party/curl-windows")
+    if(EXISTS "${_curl_local}/include/curl/curl.h")
+        message(STATUS "Using project-local libcurl: ${_curl_local}")
+        list(PREPEND CMAKE_PREFIX_PATH "${_curl_local}")
+    endif()
+endif()
+
 find_package(CURL QUIET)
 if(NOT CURL_FOUND)
-    find_path(CURL_INCLUDE_DIR NAMES curl/curl.h)
-    find_library(CURL_LIBRARY NAMES curl libcurl libcurl_imp curl_imp)
+    if(WIN32)
+        find_path(CURL_INCLUDE_DIR NAMES curl/curl.h HINTS "${_curl_local}/include")
+        find_library(CURL_LIBRARY NAMES curl libcurl libcurl_imp curl_imp HINTS "${_curl_local}/lib")
+    else()
+        find_path(CURL_INCLUDE_DIR NAMES curl/curl.h)
+        find_library(CURL_LIBRARY NAMES curl libcurl libcurl_imp curl_imp)
+    endif()
     if(CURL_INCLUDE_DIR AND CURL_LIBRARY)
         message(STATUS "libcurl found manually: ${CURL_LIBRARY}")
         add_library(CURL::libcurl UNKNOWN IMPORTED)
@@ -88,12 +102,13 @@ endif()
 if(NOT CURL_FOUND)
     message(FATAL_ERROR
         "libcurl development files not found (need curl/curl.h + linkable libcurl).\n"
-        "  Windows (recommended, pure native):\n"
-        "    1) install vcpkg:  git clone https://github.com/microsoft/vcpkg && cd vcpkg && bootstrap-vcpkg.bat\n"
-        "    2) MSVC:   vcpkg install curl:x64-windows\n"
-        "       MinGW:  vcpkg install curl:x64-mingw-static\n"
-        "    3) configure with:  -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake\n"
-        "  Linux/Termux: pkg install libcurl   (Termux)  /  apt install libcurl4-openssl-dev  (Debian/Ubuntu)")
+        "  Windows (recommended): run scripts\\setup_curl_windows.ps1 to fetch the\n"
+        "    official curl package into third_party/curl-windows (auto-detected).\n"
+        "  Or use vcpkg:\n"
+        "    MSVC:   vcpkg install curl:x64-windows\n"
+        "    MinGW:  vcpkg install curl:x64-mingw-static\n"
+        "    then configure with -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake\n"
+        "  Linux/Termux: pkg install libcurl (Termux) / apt install libcurl4-openssl-dev (Debian/Ubuntu)")
 endif()
 
 find_package(Threads REQUIRED)
