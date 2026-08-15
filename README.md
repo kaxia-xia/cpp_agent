@@ -576,7 +576,30 @@ cmake --install build            # 默认安装到 %USERPROFILE%\.local\bin
 cmake --install build --prefix C:\tools\coding-agent
 ```
 
-> 💡 Windows 下 `run_command` 通过 `cmd.exe /C` 执行命令；终端流控（Ctrl+S/Ctrl+Q）与 `/dev/tty` 实时镜像在 Windows 上不可用，程序会自动降级。Termux 专属工具（`notify`/`clipboard`/`vibrate`/`screenshot`/`system_info`/`get_location`）在 Windows 上不可用，调用时返回错误提示（不会崩溃）。
+> 💡 Windows 下 `run_command` 通过 `cmd.exe /C` 执行命令；终端流控（Ctrl+S/Ctrl+Q）与 `/dev/tty` 实时镜像在 Windows 上不可用，程序会自动降级。
+
+### Agent 工具依赖（Windows）
+
+部分工具在 Windows 下由内置实现替代了 POSIX 命令（`grep`/`find`/`diff` 改为 Python 脚本，`zip`/`unzip` 改为系统自带 bsdtar），因此依赖比 Linux 更少：
+
+| 工具 | 所需安装 | 说明 |
+|------|----------|------|
+| `run_python` / `parse_html` / `parse_xml` / `parse_json` | Python 3（勾选 Add to PATH） | 仅标准库 |
+| `search_text` / `find_files` / `diff_files` | Python 3（同上） | Windows 下由内置 Python 脚本实现 |
+| `image_info` / `image_convert` / `image_to_svg` / `create_image` / `read_pixel` / `draw_pixel` / `draw_rect` / `draw_line` / `show_image`(ASCII) | Python 3 + `pip install Pillow` | 图片处理 |
+| `qr_encode` | Python 3 + `pip install qrcode` | 二维码生成 |
+| `qr_decode` | Python 3 + `pip install pyzbar` | 二维码解码（wheel 自带 zbar DLL） |
+| `plot_chart` | Python 3 + `pip install matplotlib` | 图表绘制 |
+| `ocr` | [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki)（勾选中文语言包） | OCR 识别 |
+| `render_mermaid` | Node.js LTS + `npm install -g @mermaid-js/mermaid-cli` | Mermaid 渲染 |
+| `create_video` | [ffmpeg](https://www.gyan.dev/ffmpeg/builds/)（解压加 PATH） | 视频合成 |
+| `compress` / `decompress` | 无需安装 | Windows 10+ 自带 bsdtar（`tar`） |
+| `weather` / `fetch_url` | 无需安装 | Windows 10+ 自带 `curl` |
+| `show_image`(系统查看器) | 无需安装 | 使用 `start` 打开 |
+| `get_datetime` / `get_calendar` | 无需安装 | C++ 内置实现 |
+| 文件操作类工具 | 无需安装 | C++ 内置实现 |
+
+> ❌ **Termux 专属工具在 Windows 上不可用**（返回错误提示，不会崩溃）：`notify`、`clipboard`、`vibrate`、`screenshot`、`system_info`、`get_location`。
 
 ### Windows x64 下开发 C/C++ / Win32 程序
 

@@ -335,6 +335,48 @@ inline ShellResult run_shell(std::string_view cmd, const fs::path& cwd, int time
 
 #endif  // _WIN32
 
+// ── Shell command building (platform-aware) ─────────────────────────
+// Tool bodies build command strings through these helpers so POSIX (sh)
+// and Windows (cmd.exe) syntax differences stay in one place.
+// On POSIX the output is byte-for-byte identical to the previous
+// hand-written escaping, so Termux/Linux behaviour is unchanged.
+#ifdef _WIN32
+namespace sh {
+    // Quote one argument for cmd.exe.  Embedded '"' is doubled ("").
+    inline std::string q(std::string_view s) {
+        std::string out = "\"";
+        for (char c : s) {
+            if (c == '"') out += "\"\"";
+            else out.push_back(c);
+        }
+        out += "\"";
+        return out;
+    }
+    inline const char* py() { return "python"; }
+    inline std::string redirect_null() { return "2>NUL"; }
+    inline const char* no_fail() { return "rem"; }   // `|| rem` ≈ `|| true`
+    inline const char* which_cmd() { return "where"; }
+    inline std::string null_device() { return "NUL"; }
+}
+#else
+namespace sh {
+    inline std::string q(std::string_view s) {
+        std::string out = "'";
+        for (char c : s) {
+            if (c == '\'') out += "'\\''";
+            else out.push_back(c);
+        }
+        out += "'";
+        return out;
+    }
+    inline const char* py() { return "python3"; }
+    inline std::string redirect_null() { return "2>/dev/null"; }
+    inline const char* no_fail() { return "true"; }
+    inline const char* which_cmd() { return "which"; }
+    inline std::string null_device() { return "/dev/null"; }
+}
+#endif
+
 // ── Tool schema definitions ──────────────────────────────────────────
 // Each tool is exposed to the LLM via OpenAI function-calling format.
 
@@ -1746,6 +1788,18 @@ inline std::string execute(const std::string& name, std::string_view arguments,
     };
 
     try {
+#ifdef _WIN32
+        // Termux-only tools are unavailable on Windows (they need Termux:API
+        // or Android system integration).  Return a clear message instead of
+        // a confusing "command not recognized" error.
+        {
+            std::string_view tn = name;
+            if (tn == "clipboard" || tn == "notify" || tn == "vibrate" ||
+                tn == "screenshot" || tn == "system_info" || tn == "get_location") {
+                return std::format("[tool error: '{}' requires Termux:API and is not available on Windows]", name);
+            }
+        }
+#endif
         // ── read_file ────────────────────────────────────────────────
         if (name == "read_file") {
             std::string path = get_str("path");
@@ -2186,6 +2240,55 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             if (path.empty()) path = ".";
 
             fs::path resolved = resolve_under_root(root, path);
+#ifdef _WIN32
+            // Windows has no `grep`; use a small Python recursive search.
+            {
+                std::string py_script =
+                    "import sys, os, re\n"
+                    "pattern = sys.argv[1]\n"
+                    "path = sys.argv[2]\n"
+                    "use_regex = sys.argv[3] == '1'\n"
+                    "max_bytes = int(sys.argv[4])\n"
+                    "out = []\n"
+                    "total = 0\n"
+                    "def walk(p):\n"
+                    "    global total\n"
+                    "    if total >= max_bytes: return\n"
+                    "    if os.path.isfile(p):\n"
+                    "        try:\n"
+                    "            with open(p, encoding='utf-8', errors='replace') as f:\n"
+                    "                for i, line in enumerate(f, 1):\n"
+                    "                    if total >= max_bytes: return\n"
+                    "                    hit = False\n"
+                    "                    if use_regex:\n"
+                    "                        try: hit = re.search(pattern, line) is not None\n"
+                    "                        except re.error: hit = False\n"
+                    "                    else:\n"
+                    "                        hit = pattern in line\n"
+                    "                    if hit:\n"
+                    "                        s = f'{p}:{i}:{line.rstrip()}\\n'\n"
+                    "                        out.append(s)\n"
+                    "                        total += len(s)\n"
+                    "        except OSError:\n"
+                    "            pass\n"
+                    "    elif os.path.isdir(p):\n"
+                    "        try: names = sorted(os.listdir(p))\n"
+                    "        except OSError: return\n"
+                    "        for n in names:\n"
+                    "            walk(os.path.join(p, n))\n"
+                    "            if total >= max_bytes: return\n"
+                    "walk(path)\n"
+                    "sys.stdout.write(''.join(out))\n";
+                std::string pyfile = (fs::temp_directory_path() / "agent_search.py").string();
+                { std::ofstream pf(pyfile); pf << py_script; }
+                std::string cmd = std::format("{} {} {} {} {} {} 2>&1 || {}",
+                    sh::py(), sh::q(pyfile), sh::q(pattern), sh::q(resolved.string()),
+                    regex ? "1" : "0", max_bytes, sh::no_fail());
+                ShellResult r = run_shell(cmd, root, 30);
+                if (r.output.empty()) return std::format("[no matches found for '{}']", pattern);
+                return truncate(r.output, max_bytes);
+            }
+#else
             std::string grep_opts = regex ? "-rn" : "-rnF";
             // Escape single quotes in pattern for shell
             std::string escaped_pattern;
@@ -2198,6 +2301,7 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             ShellResult r = run_shell(cmd, root, 30);
             if (r.output.empty()) return std::format("[no matches found for '{}']", pattern);
             return truncate(r.output, max_bytes);
+#endif
         }
 
         // ── find_files ───────────────────────────────────────────────
@@ -2208,6 +2312,39 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             if (path.empty()) path = ".";
 
             fs::path resolved = resolve_under_root(root, path);
+#ifdef _WIN32
+            // Windows has no `find -name`; use a small Python recursive glob.
+            {
+                std::string py_script =
+                    "import sys, os, fnmatch\n"
+                    "pattern = sys.argv[1]\n"
+                    "path = sys.argv[2]\n"
+                    "out = []\n"
+                    "count = 0\n"
+                    "def walk(p):\n"
+                    "    global count\n"
+                    "    if count >= 200: return\n"
+                    "    if os.path.isfile(p):\n"
+                    "        if fnmatch.fnmatch(os.path.basename(p), pattern):\n"
+                    "            out.append(p + '\\n')\n"
+                    "            count += 1\n"
+                    "    elif os.path.isdir(p):\n"
+                    "        try: names = sorted(os.listdir(p))\n"
+                    "        except OSError: return\n"
+                    "        for n in names:\n"
+                    "            walk(os.path.join(p, n))\n"
+                    "            if count >= 200: return\n"
+                    "walk(path)\n"
+                    "sys.stdout.write(''.join(out))\n";
+                std::string pyfile = (fs::temp_directory_path() / "agent_find.py").string();
+                { std::ofstream pf(pyfile); pf << py_script; }
+                std::string cmd = std::format("{} {} {} {} 2>&1 || {}",
+                    sh::py(), sh::q(pyfile), sh::q(pattern), sh::q(resolved.string()), sh::no_fail());
+                ShellResult r = run_shell(cmd, root, 30);
+                if (r.output.empty()) return std::format("[no files matching '{}']", pattern);
+                return truncate(r.output);
+            }
+#else
             // Use find with -name for glob pattern
             std::string escaped_pattern;
             for (char c : pattern) {
@@ -2219,6 +2356,7 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             ShellResult r = run_shell(cmd, root, 30);
             if (r.output.empty()) return std::format("[no files matching '{}']", pattern);
             return truncate(r.output);
+#endif
         }
 
         // ── file_info ────────────────────────────────────────────────
@@ -2237,7 +2375,32 @@ inline std::string execute(const std::string& name, std::string_view arguments,
 
             auto size = fs::file_size(resolved, ec);
 
-            // Get permissions via stat command for human-readable output
+            // Get permissions: POSIX uses stat(1); Windows uses std::filesystem.
+            std::string perms;
+#ifdef _WIN32
+            {
+                std::error_code perm_ec;
+                auto st = fs::status(resolved, perm_ec);
+                perms = "(unknown)";
+                if (!perm_ec) {
+                    auto pm = st.permissions();
+                    std::string s = "---------";
+                    auto set = [&](size_t i, fs::perms bit, char c) {
+                        if ((pm & bit) != fs::perms::none) s[i] = c;
+                    };
+                    set(0, fs::perms::owner_read, 'r');
+                    set(1, fs::perms::owner_write, 'w');
+                    set(2, fs::perms::owner_exec, 'x');
+                    set(3, fs::perms::group_read, 'r');
+                    set(4, fs::perms::group_write, 'w');
+                    set(5, fs::perms::group_exec, 'x');
+                    set(6, fs::perms::others_read, 'r');
+                    set(7, fs::perms::others_write, 'w');
+                    set(8, fs::perms::others_exec, 'x');
+                    perms = s;
+                }
+            }
+#else
             std::string escaped_path;
             for (char c : resolved.string()) {
                 if (c == '\'') escaped_path += "'\\''";
@@ -2245,7 +2408,8 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             }
             std::string perm_cmd = std::format("stat -c '%A %U:%G' '{}' 2>/dev/null || true", escaped_path);
             ShellResult perm_res = run_shell(perm_cmd, root, 5);
-            std::string perms = perm_res.exit_code == 0 ? perm_res.output : "(unknown)";
+            perms = perm_res.exit_code == 0 ? perm_res.output : "(unknown)";
+#endif
 
             std::ostringstream ss;
             ss << std::format("path: {}\n", resolved.string());
@@ -2394,18 +2558,13 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             size_t max_bytes = static_cast<size_t>(std::max(1024, get_int("max_bytes", 200000)));
 
             auto do_fetch = [&](const std::string& fetch_url) -> std::pair<std::string, std::string> {
-                std::string escaped;
-                for (char c : fetch_url) {
-                    if (c == '\'') escaped += "'\\''";
-                    else escaped.push_back(c);
-                }
-                std::string cmd = std::format("curl -sL --max-time {} '{}' 2>/dev/null || true",
-                                              timeout, escaped);
+                std::string cmd = std::format("curl -sL --max-time {} {} {} || {}",
+                                              timeout, sh::q(fetch_url), sh::redirect_null(), sh::no_fail());
                 ShellResult r = run_shell(cmd, root, timeout + 10);
 
                 std::string status_cmd = std::format(
-                    "curl -sL -o /dev/null -w '%{{http_code}}' --max-time {} '{}' 2>/dev/null || echo '000'",
-                    timeout, escaped);
+                    "curl -sL -o {} -w {} --max-time {} {} {} || echo {}",
+                    sh::null_device(), sh::q("%{http_code}"), timeout, sh::q(fetch_url), sh::redirect_null(), sh::q("000"));
                 ShellResult status_r = run_shell(status_cmd, root, timeout + 10);
                 std::string code = status_r.output;
                 while (!code.empty() && (code.back() == '\n' || code.back() == '\r'))
@@ -2550,10 +2709,9 @@ inline std::string execute(const std::string& name, std::string_view arguments,
 
             std::string cmd;
             if (query == "text" || query == "links") {
-                cmd = std::format("python3 '{}' < '{}' 2>&1 || true", pyfile, htmlfile);
+                cmd = std::format("{} {} < {} 2>&1 || {}", sh::py(), sh::q(pyfile), sh::q(htmlfile), sh::no_fail());
             } else {
-                std::string eq; for (char c : query) { if (c == '\'') eq += "'\\''"; else eq.push_back(c); }
-                cmd = std::format("python3 '{}' '{}' < '{}' 2>&1 || true", pyfile, eq, htmlfile);
+                cmd = std::format("{} {} {} < {} 2>&1 || {}", sh::py(), sh::q(pyfile), sh::q(query), sh::q(htmlfile), sh::no_fail());
             }
 
             ShellResult r = run_shell(cmd, root, 30);
@@ -2616,10 +2774,9 @@ inline std::string execute(const std::string& name, std::string_view arguments,
 
             std::string cmd;
             if (xpath == "text" || xpath == "structure") {
-                cmd = std::format("python3 '{}' < '{}' 2>&1 || true", pyfile, xmlfile);
+                cmd = std::format("{} {} < {} 2>&1 || {}", sh::py(), sh::q(pyfile), sh::q(xmlfile), sh::no_fail());
             } else {
-                std::string ex; for (char c : xpath) { if (c == '\'') ex += "'\\''"; else ex.push_back(c); }
-                cmd = std::format("python3 '{}' '{}' < '{}' 2>&1 || true", pyfile, ex, xmlfile);
+                cmd = std::format("{} {} {} < {} 2>&1 || {}", sh::py(), sh::q(pyfile), sh::q(xpath), sh::q(xmlfile), sh::no_fail());
             }
 
             ShellResult r = run_shell(cmd, root, 30);
@@ -2666,10 +2823,9 @@ inline std::string execute(const std::string& name, std::string_view arguments,
 
             std::string cmd;
             if (query.empty()) {
-                cmd = std::format("python3 '{}' '' < '{}' 2>&1 || true", pyfile, jsonfile);
+                cmd = std::format("{} {} {} < {} 2>&1 || {}", sh::py(), sh::q(pyfile), sh::q(""), sh::q(jsonfile), sh::no_fail());
             } else {
-                std::string eq; for (char c : query) { if (c == '\'') eq += "'\\''"; else eq.push_back(c); }
-                cmd = std::format("python3 '{}' '{}' < '{}' 2>&1 || true", pyfile, eq, jsonfile);
+                cmd = std::format("{} {} {} < {} 2>&1 || {}", sh::py(), sh::q(pyfile), sh::q(query), sh::q(jsonfile), sh::no_fail());
             }
 
             ShellResult r = run_shell(cmd, root, 30);
@@ -2687,14 +2843,15 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             fs::path output_path = resolve_under_root(root, output);
             fs::create_directories(output_path.parent_path());
 
-            std::string check_cmd = "which mmdc 2>/dev/null || true";
+            std::string check_cmd = std::format("{} mmdc {} || {}", sh::which_cmd(), sh::redirect_null(), sh::no_fail());
             ShellResult check_r = run_shell(check_cmd, root, 5);
             bool has_mmdc = !check_r.output.empty() && check_r.output.find("mmdc") != std::string::npos;
 
             if (has_mmdc) {
                 std::string mmdfile = (fs::temp_directory_path() / "agent_diagram.mmd").string();
                 { std::ofstream mf(mmdfile); mf << mermaid; }
-                std::string cmd = std::format("mmdc -i '{}' -o '{}' -w 1200 -H 800 2>&1 || true", mmdfile, output_path.string());
+                std::string cmd = std::format("mmdc -i {} -o {} -w 1200 -H 800 2>&1 || {}",
+                                              sh::q(mmdfile), sh::q(output_path.string()), sh::no_fail());
                 ShellResult r2 = run_shell(cmd, root, 60);
                 if (r2.exit_code == 0 && fs::exists(output_path)) {
                     auto sz = fs::file_size(output_path);
@@ -2752,7 +2909,7 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             std::string pyfile = (fs::temp_directory_path() / "agent_img_info.py").string();
             { std::ofstream pf(pyfile); pf << py_script; }
 
-            std::string cmd = std::format("python3 '{}' '{}' 2>&1 || true", pyfile, resolved.string());
+            std::string cmd = std::format("{} {} {} 2>&1 || {}", sh::py(), sh::q(pyfile), sh::q(resolved.string()), sh::no_fail());
             ShellResult r = run_shell(cmd, root, 30);
             if (r.exit_code != 0 || r.output.empty()) {
                 return std::format("[error: could not read image '{}']\n{}", path, r.output);
@@ -2799,9 +2956,9 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             std::string pyfile = (fs::temp_directory_path() / "agent_img_convert.py").string();
             { std::ofstream pf(pyfile); pf << py_script; }
 
-            std::string cmd = std::format("python3 '{}' '{}' '{}' {} {} {} 2>&1 || true",
-                                          pyfile, src_resolved.string(), dst_resolved.string(),
-                                          width, height, quality);
+            std::string cmd = std::format("{} {} {} {} {} {} {} 2>&1 || {}",
+                                          sh::py(), sh::q(pyfile), sh::q(src_resolved.string()), sh::q(dst_resolved.string()),
+                                          width, height, quality, sh::no_fail());
             ShellResult r = run_shell(cmd, root, 60);
             if (r.exit_code != 0 || r.output.find("OK:") == std::string::npos) {
                 return std::format("[error: conversion failed]\n{}", r.output);
@@ -2842,8 +2999,8 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             std::string pyfile = (fs::temp_directory_path() / "agent_img2svg.py").string();
             { std::ofstream pf(pyfile); pf << py_script; }
 
-            std::string cmd = std::format("python3 '{}' '{}' '{}' 2>&1 || true",
-                                          pyfile, src_resolved.string(), dst_resolved.string());
+            std::string cmd = std::format("{} {} {} {} 2>&1 || {}",
+                                          sh::py(), sh::q(pyfile), sh::q(src_resolved.string()), sh::q(dst_resolved.string()), sh::no_fail());
             ShellResult r = run_shell(cmd, root, 60);
             if (r.exit_code != 0 || r.output.find("OK:") == std::string::npos) {
                 return std::format("[error: conversion failed]\n{}", r.output);
@@ -2927,7 +3084,7 @@ inline std::string execute(const std::string& name, std::string_view arguments,
                 pf << code << "\n";
             }
 
-            std::string cmd = std::format("python3 '{}' 2>&1 || true", pyfile);
+            std::string cmd = std::format("{} {} 2>&1 || {}", sh::py(), sh::q(pyfile), sh::no_fail());
             ShellResult r = run_shell(cmd, root, timeout);
             if (r.output.empty()) r.output = "(no output)\n";
             return std::format("[python exit_code={}]\n{}", r.exit_code, truncate(r.output, 100000));
@@ -2944,13 +3101,8 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             std::error_code ec;
             if (!fs::exists(resolved, ec)) return std::format("[error: file not found: {}]", resolved.string());
 
-            std::string escaped_path;
-            for (char c : resolved.string()) {
-                if (c == '\'') escaped_path += "'\\''";
-                else escaped_path.push_back(c);
-            }
-
-            std::string cmd = std::format("tesseract '{}' stdout -l '{}' 2>/dev/null || true", escaped_path, lang);
+            std::string cmd = std::format("tesseract {} stdout -l {} {} || {}",
+                                          sh::q(resolved.string()), sh::q(lang), sh::redirect_null(), sh::no_fail());
             ShellResult r = run_shell(cmd, root, 60);
             if (r.exit_code != 0 || r.output.empty()) {
                 return std::format("[error: OCR failed. Is tesseract installed? Try: pkg install tesseract]\n{}", r.output);
@@ -2978,14 +3130,8 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             std::string pyfile = (fs::temp_directory_path() / "agent_qr_encode.py").string();
             { std::ofstream pf(pyfile); pf << py_script; }
 
-            std::string escaped_data;
-            for (char c : data) {
-                if (c == '\'') escaped_data += "'\\''";
-                else escaped_data.push_back(c);
-            }
-
-            std::string cmd = std::format("python3 '{}' '{}' '{}' 2>&1 || true",
-                                          pyfile, escaped_data, out_path.string());
+            std::string cmd = std::format("{} {} {} {} 2>&1 || {}",
+                                          sh::py(), sh::q(pyfile), sh::q(data), sh::q(out_path.string()), sh::no_fail());
             ShellResult r = run_shell(cmd, root, 30);
             if (r.exit_code != 0 || r.output.find("OK:") == std::string::npos) {
                 return std::format("[error: QR code generation failed]\n{}", r.output);
@@ -3021,10 +3167,13 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             std::string pyfile = (fs::temp_directory_path() / "agent_qr_decode.py").string();
             { std::ofstream pf(pyfile); pf << py_script; }
 
-            std::string cmd = std::format("python3 '{}' '{}' 2>&1 || true", pyfile, resolved.string());
+            std::string cmd = std::format("{} {} {} 2>&1 || {}", sh::py(), sh::q(pyfile), sh::q(resolved.string()), sh::no_fail());
             ShellResult r = run_shell(cmd, root, 30);
 
             if (r.output.find("NO_PYZBAR") != std::string::npos) {
+#ifdef _WIN32
+                return "[error: pyzbar is not installed. Install it with: pip install pyzbar]";
+#else
                 std::string escaped_path;
                 for (char c : resolved.string()) {
                     if (c == '\'') escaped_path += "'\\''";
@@ -3034,6 +3183,7 @@ inline std::string execute(const std::string& name, std::string_view arguments,
                 r = run_shell(cmd, root, 30);
                 if (r.output.empty()) return "[no barcode/QR code found in image]";
                 return std::format("[barcode/QR result from '{}']\n{}", image_path, r.output);
+#endif
             }
 
             if (r.output.find("NO_RESULT") != std::string::npos) {
@@ -3056,6 +3206,25 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             if (!fs::exists(f1_res, ec)) return std::format("[error: file not found: {}]", f1);
             if (!fs::exists(f2_res, ec)) return std::format("[error: file not found: {}]", f2);
 
+#ifdef _WIN32
+            // Windows has no `diff` by default; use Python difflib.
+            {
+                std::string py_script =
+                    "import sys, difflib\n"
+                    "a = open(sys.argv[1], encoding='utf-8', errors='replace').read().splitlines()\n"
+                    "b = open(sys.argv[2], encoding='utf-8', errors='replace').read().splitlines()\n"
+                    "n = int(sys.argv[3]) if len(sys.argv) > 3 else 3\n"
+                    "d = difflib.unified_diff(a, b, fromfile=sys.argv[1], tofile=sys.argv[2], n=n)\n"
+                    "sys.stdout.write('\\n'.join(d))\n";
+                std::string pyfile = (fs::temp_directory_path() / "agent_diff.py").string();
+                { std::ofstream pf(pyfile); pf << py_script; }
+                std::string cmd = std::format("{} {} {} {} {} 2>&1 || {}",
+                    sh::py(), sh::q(pyfile), sh::q(f1_res.string()), sh::q(f2_res.string()), ctx, sh::no_fail());
+                ShellResult r = run_shell(cmd, root, 30);
+                if (r.output.empty()) return "[files are identical]";
+                return truncate(r.output, 100000);
+            }
+#else
             auto esc = [](const fs::path& p) {
                 std::string s = p.string();
                 std::string r;
@@ -3070,6 +3239,7 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             ShellResult r = run_shell(cmd, root, 30);
             if (r.output.empty()) return "[files are identical]";
             return truncate(r.output, 100000);
+#endif
         }
 
         // ── compress ─────────────────────────────────────────────────
@@ -3093,6 +3263,24 @@ inline std::string execute(const std::string& name, std::string_view arguments,
                 else format = "zip";
             }
 
+#ifdef _WIN32
+            std::string cmd;
+            {
+                bool is_dir = fs::is_directory(src_res, ec);
+                std::string base = is_dir ? src_res.string() : src_res.parent_path().string();
+                std::string target = is_dir ? "." : src_res.filename().string();
+                if (format == "zip") {
+                    // Windows 10+ bsdtar supports `-a` (auto by extension).
+                    cmd = std::format("tar -a -cf {} -C {} {} 2>&1 || {}",
+                                      sh::q(out_res.string()), sh::q(base), sh::q(target), sh::no_fail());
+                } else if (format == "tar.gz") {
+                    cmd = std::format("tar -czf {} -C {} {} 2>&1 || {}",
+                                      sh::q(out_res.string()), sh::q(base), sh::q(target), sh::no_fail());
+                } else {
+                    return "[error: unsupported format. Use 'zip' or 'tar.gz']";
+                }
+            }
+#else
             auto esc = [](const fs::path& p) {
                 std::string s = p.string();
                 std::string r;
@@ -3119,6 +3307,7 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             } else {
                 return std::format("[error: unsupported format '{}'. Use 'zip' or 'tar.gz']", format);
             }
+#endif
 
             ShellResult r = run_shell(cmd, root, 120);
             if (r.exit_code != 0 || !fs::exists(out_res, ec)) {
@@ -3148,6 +3337,11 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             fs::path out_res = resolve_under_root(root, output_dir);
             fs::create_directories(out_res, ec);
 
+#ifdef _WIN32
+            // Windows 10+ ships bsdtar, which auto-detects zip/tar.gz/bz2/xz.
+            std::string cmd = std::format("tar -xf {} -C {} 2>&1 || {}",
+                                          sh::q(arc_res.string()), sh::q(out_res.string()), sh::no_fail());
+#else
             auto esc = [](const fs::path& p) {
                 std::string s = p.string();
                 std::string r;
@@ -3172,6 +3366,7 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             } else {
                 cmd = std::format("tar -xf '{}' -C '{}' 2>&1 || true", esc(arc_res), esc(out_res));
             }
+#endif
 
             ShellResult r = run_shell(cmd, root, 120);
             if (r.exit_code != 0) {
@@ -3244,13 +3439,8 @@ inline std::string execute(const std::string& name, std::string_view arguments,
                 url = std::format("https://wttr.in/{}?format=4&m", escaped);
             }
 
-            std::string escaped_url;
-            for (char c : url) {
-                if (c == '\'') escaped_url += "'\\''";
-                else escaped_url.push_back(c);
-            }
-
-            std::string cmd = std::format("curl -sL --max-time 15 '{}' 2>/dev/null || true", escaped_url);
+            std::string cmd = std::format("curl -sL --max-time 15 {} {} || {}",
+                                          sh::q(url), sh::redirect_null(), sh::no_fail());
             ShellResult r = run_shell(cmd, root, 20);
             std::string short_weather = r.output;
 
@@ -3258,14 +3448,17 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             if (location.empty()) {
                 detail_url = "https://wttr.in?m";
             } else {
-                detail_url = std::format("https://wttr.in/{}?m", escaped_url);
+                detail_url = std::format("https://wttr.in/{}?m", url);
             }
-            std::string escaped_detail;
-            for (char c : detail_url) {
-                if (c == '\'') escaped_detail += "'\\''";
-                else escaped_detail.push_back(c);
-            }
-            cmd = std::format("curl -sL --max-time 15 '{}' 2>/dev/null | head -50 || true", escaped_detail);
+#ifdef _WIN32
+            // cmd.exe has no `head`; wttr.in detail responses are short and
+            // the final result is truncated below anyway.
+            cmd = std::format("curl -sL --max-time 15 {} {} || {}",
+                              sh::q(detail_url), sh::redirect_null(), sh::no_fail());
+#else
+            cmd = std::format("curl -sL --max-time 15 {} {} | head -50 || {}",
+                              sh::q(detail_url), sh::redirect_null(), sh::no_fail());
+#endif
             ShellResult r2 = run_shell(cmd, root, 20);
 
             std::ostringstream ss;
@@ -3328,50 +3521,26 @@ except Exception as e:
             std::string format = get_str("format");
             if (format.empty()) format = "%Y-%m-%d %H:%M:%S %Z";
 
-            // Escape single quotes for shell
-            std::string escaped_fmt;
-            for (char c : format) {
-                if (c == '\'') escaped_fmt += "'\\''";
-                else escaped_fmt.push_back(c);
+            std::string dt = platform::format_time_now(format);
+            if (dt.empty()) {
+                return "[error: could not format date/time (unsupported format string?)]";
             }
-
-            std::string cmd = std::format("date '+{}' 2>&1 || true", escaped_fmt);
-            ShellResult r = run_shell(cmd, root, 5);
-
-            if (r.exit_code != 0 || r.output.empty()) {
-                return std::format("[error: could not get date/time]\n{}", r.output);
-            }
-
-            // Also get timezone and timestamp info
-            std::string cmd_tz = "date '+%Z' 2>/dev/null || true";
-            ShellResult r_tz = run_shell(cmd_tz, root, 5);
-
-            std::string cmd_epoch = "date '+%s' 2>/dev/null || true";
-            ShellResult r_epoch = run_shell(cmd_epoch, root, 5);
 
             std::ostringstream ss;
-            ss << r.output;
-            if (!ss.str().empty() && ss.str().back() != '\n') ss << '\n';
-            if (!r_tz.output.empty()) {
-                std::string tz = r_tz.output;
-                while (!tz.empty() && (tz.back() == '\n' || tz.back() == '\r')) tz.pop_back();
-                ss << std::format("Timezone: {}\n", tz);
-            }
-            if (!r_epoch.output.empty()) {
-                std::string ep = r_epoch.output;
-                while (!ep.empty() && (ep.back() == '\n' || ep.back() == '\r')) ep.pop_back();
-                ss << std::format("Unix timestamp: {}\n", ep);
-            }
+            ss << dt;
+            if (ss.str().back() != '\n') ss << '\n';
+
+            std::string tz = platform::format_time_now("%Z");
+            if (!tz.empty()) ss << std::format("Timezone: {}\n", tz);
+
+            ss << std::format("Unix timestamp: {}\n", platform::unix_timestamp_now());
             return ss.str();
         }
         // ── get_calendar - Chinese calendar (pure C++) ────────────────
         if (name == "get_calendar") {
             std::string date_str = get_str("date");
             if (date_str.empty()) {
-                ShellResult r = run_shell("date '+%Y-%m-%d' 2>/dev/null || true", root, 5);
-                date_str = r.output;
-                while (!date_str.empty() && (date_str.back() == '\n' || date_str.back() == '\r'))
-                    date_str.pop_back();
+                date_str = platform::format_time_now("%Y-%m-%d");
             }
             if (date_str.size() != 10 || date_str[4] != '-' || date_str[7] != '-')
                 return std::format("[error: invalid date format '{}'. Use YYYY-MM-DD.]", date_str);
@@ -3475,19 +3644,8 @@ print(f'OK: chart saved to {output}')
             std::string pyfile = (fs::temp_directory_path() / "agent_plot.py").string();
             { std::ofstream pf(pyfile); pf << py_script; }
 
-            std::string escaped_data;
-            for (char c : data_json) {
-                if (c == '\'') escaped_data += "'\\''";
-                else escaped_data.push_back(c);
-            }
-            std::string escaped_title;
-            for (char c : title) {
-                if (c == '\'') escaped_title += "'\\''";
-                else escaped_title.push_back(c);
-            }
-
-            std::string cmd = std::format("python3 '{}' '{}' '{}' '{}' '{}' 2>&1 || true",
-                                          pyfile, chart_type, escaped_data, escaped_title, out_path.string());
+            std::string cmd = std::format("{} {} {} {} {} {} 2>&1 || {}",
+                                          sh::py(), sh::q(pyfile), sh::q(chart_type), sh::q(data_json), sh::q(title), sh::q(out_path.string()), sh::no_fail());
             ShellResult r = run_shell(cmd, root, 60);
             std::error_code ec;
             if (fs::exists(out_path, ec) && fs::file_size(out_path, ec) > 0) {
@@ -3515,26 +3673,41 @@ print(f'OK: chart saved to {output}')
             bool is_svg = (ext == ".svg" || ext == ".SVG");
 
             if (is_svg) {
-                // Convert SVG to PNG using Python's cairosvg or rsvg-convert
                 std::string png_path = (fs::temp_directory_path() / "agent_svg_temp.png").string();
+#ifdef _WIN32
+                // Windows has no rsvg-convert/ImageMagick by default.
+                // Try Python cairosvg; if unavailable, `start` can still
+                // open the SVG via the default browser below.
+                {
+                    std::string svg_py = (fs::temp_directory_path() / "agent_svg.py").string();
+                    { std::ofstream sf(svg_py); sf << "import sys, cairosvg\ncairosvg.svg2png(url=sys.argv[1], write_to=sys.argv[2])\n"; }
+                    std::string svg_cmd = std::format("{} {} {} {} 2>&1 || {}",
+                        sh::py(), sh::q(svg_py), sh::q(resolved.string()), sh::q(png_path), sh::no_fail());
+                    ShellResult svg_r = run_shell(svg_cmd, root, 30);
+                }
+#else
                 std::string escaped_src, escaped_dst;
                 for (char c : resolved.string()) { if (c == '\'') escaped_src += "'\\''"; else escaped_src.push_back(c); }
                 for (char c : png_path) { if (c == '\'') escaped_dst += "'\\''"; else escaped_dst.push_back(c); }
 
-                // Try rsvg-convert first, then cairosvg, then fallback
                 // Try rsvg-convert first, then ImageMagick convert, as fallback
                 std::string svg_cmd = std::format("rsvg-convert '{}' -o '{}' 2>/dev/null || convert '{}' '{}' 2>/dev/null || true",
                                                   escaped_src, escaped_dst, escaped_src, escaped_dst);
                 ShellResult svg_r = run_shell(svg_cmd, root, 30);
+#endif
                 if (fs::exists(png_path, ec) && fs::file_size(png_path, ec) > 0) {
                     display_path = png_path;
                 } else {
-                    return std::format("[error: cannot convert SVG '{}' to PNG. Install rsvg-convert: pkg install librsvg]", path);
+                    return std::format("[error: cannot convert SVG '{}' to PNG. Install rsvg-convert (pkg install librsvg) or Python cairosvg (pip install cairosvg)]", path);
                 }
             }
 
             // Determine method
             if (method == "auto") {
+#ifdef _WIN32
+                // Windows has no termux-open; use `start` (system viewer).
+                method = "start";
+#else
                 // Check if termux-open is available
                 std::string check_cmd = "command -v termux-open 2>/dev/null || true";
                 ShellResult check_r = run_shell(check_cmd, root, 5);
@@ -3543,9 +3716,19 @@ print(f'OK: chart saved to {output}')
                 } else {
                     method = "ascii";
                 }
+#endif
             }
 
-            if (method == "termux-open") {
+            if (method == "termux-open" || method == "start") {
+#ifdef _WIN32
+                std::string cmd = std::format("start \"\" {}", sh::q(display_path.string()));
+                ShellResult r = run_shell(cmd, root, 10);
+                (void)r;
+                std::ostringstream ss;
+                ss << std::format("[ok: opened '{}' with system image viewer]", path);
+                if (is_svg) ss << " (SVG)";
+                return ss.str();
+#else
                 std::string escaped;
                 for (char c : display_path.string()) { if (c == '\'') escaped += "'\\''"; else escaped.push_back(c); }
                 std::string cmd = std::format("termux-open '{}' 2>&1 || true", escaped);
@@ -3558,14 +3741,19 @@ print(f'OK: chart saved to {output}')
                 }
                 // Fallback to ascii if termux-open fails
                 method = "ascii";
+#endif
             }
 
             if (method == "ascii") {
                 // Use Python PIL to render image as ASCII art
                 if (ascii_width == 0) {
+#ifdef _WIN32
+                    ascii_width = platform::terminal_width(80);
+#else
                     // Try to get terminal width
                     ShellResult tw_r = run_shell("tput cols 2>/dev/null || echo 80", root, 5);
                     try { ascii_width = std::stoi(tw_r.output); } catch (...) { ascii_width = 80; }
+#endif
                     ascii_width = std::clamp(ascii_width, 40, 200);
                 }
 
@@ -3620,10 +3808,7 @@ except Exception as e:
                 std::string pyfile = (fs::temp_directory_path() / "agent_show_image.py").string();
                 { std::ofstream pf(pyfile); pf << py_script; }
 
-                std::string escaped_path;
-                for (char c : display_path.string()) { if (c == '\'') escaped_path += "'\\''"; else escaped_path.push_back(c); }
-
-                std::string cmd = std::format("python3 '{}' '{}' {} 2>&1 || true", pyfile, escaped_path, ascii_width);
+                std::string cmd = std::format("{} {} {} {} 2>&1 || {}", sh::py(), sh::q(pyfile), sh::q(display_path.string()), ascii_width, sh::no_fail());
                 ShellResult r = run_shell(cmd, root, 30);
 
                 if (r.exit_code == 0 && !r.output.empty()) {
@@ -3690,36 +3875,43 @@ except Exception as e:
             {
                 std::ofstream cf(concat_file);
                 for (const auto& img : resolved_images) {
+#ifdef _WIN32
+                    // ffmpeg on Windows treats backslashes as escapes; use forward slashes.
+                    std::string ff_path = img;
+                    std::replace(ff_path.begin(), ff_path.end(), '\\', '/');
+                    std::string ff_esc;
+                    for (char c : ff_path) {
+                        if (c == '\'') ff_esc += "'\\''";
+                        else ff_esc.push_back(c);
+                    }
+                    cf << "file '" << ff_esc << "'\n";
+#else
                     cf << "file '" << img << "'\n";
+#endif
                     if (duration_per_image > 0) {
                         cf << "duration " << std::fixed << std::setprecision(6) << duration_per_image << "\n";
                     }
                 }
             }
 
-            std::string escaped_concat;
-            for (char c : concat_file) { if (c == '\'') escaped_concat += "'\\''"; else escaped_concat.push_back(c); }
-            std::string escaped_output;
-            for (char c : out_path.string()) { if (c == '\'') escaped_output += "'\\''"; else escaped_output.push_back(c); }
-
             std::string cmd;
             if (is_gif) {
                 // For GIF: use palette for better quality
                 std::string palette_file = (fs::temp_directory_path() / "agent_video_palette.png").string();
-                std::string escaped_palette;
-                for (char c : palette_file) { if (c == '\'') escaped_palette += "'\\''"; else escaped_palette.push_back(c); }
 
                 std::string fps_str = std::format("{}", fps);
                 if (duration_per_image > 0) {
                     fps_str = std::format("{}", 1.0 / duration_per_image);
                 }
 
-                // Generate palette
+                std::string vf1 = std::format("fps={},scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos,palettegen=stats_mode=diff", fps_str);
+                std::string vf2 = std::format("fps={},scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5", fps_str);
+
                 cmd = std::format(
-                    "ffmpeg -y -f concat -safe 0 -i '{}' -vf \"fps={},scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos,palettegen=stats_mode=diff\" '{}' 2>&1 && "
-                    "ffmpeg -y -f concat -safe 0 -i '{}' -i '{}' -lavfi \"fps={},scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5\" -loop {} '{}' 2>&1 || true",
-                    escaped_concat, fps_str, escaped_palette,
-                    escaped_concat, escaped_palette, fps_str, loop, escaped_output);
+                    "ffmpeg -y -f concat -safe 0 -i {} -vf {} {} 2>&1 && "
+                    "ffmpeg -y -f concat -safe 0 -i {} -i {} -lavfi {} -loop {} {} 2>&1 || {}",
+                    sh::q(concat_file), sh::q(vf1), sh::q(palette_file),
+                    sh::q(concat_file), sh::q(palette_file), sh::q(vf2), loop, sh::q(out_path.string()), sh::no_fail());
             } else {
                 // For video: use libx264 or libx265
                 std::string fps_str = std::format("{}", fps);
@@ -3727,13 +3919,14 @@ except Exception as e:
                     fps_str = std::format("{}", 1.0 / duration_per_image);
                 }
 
-                // Try to detect if input images have alpha channel - if so, use libvpx for WebM or libx264 with alpha
+                std::string vf = std::format("fps={},scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos,format=yuv420p", fps_str);
+
                 cmd = std::format(
-                    "ffmpeg -y -f concat -safe 0 -i '{}' "
-                    "-vf \"fps={},scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos,format=yuv420p\" "
+                    "ffmpeg -y -f concat -safe 0 -i {} "
+                    "-vf {} "
                     "-c:v libx264 -preset medium -crf 23 -pix_fmt yuv420p "
-                    "-movflags +faststart '{}' 2>&1 || true",
-                    escaped_concat, fps_str, escaped_output);
+                    "-movflags +faststart {} 2>&1 || {}",
+                    sh::q(concat_file), sh::q(vf), sh::q(out_path.string()), sh::no_fail());
             }
 
             ShellResult r = run_shell(cmd, root, 300); // 5 min timeout for video encoding
@@ -3807,12 +4000,8 @@ print(f'OK: created {w}x{h} {mode} image -> {out}')
             std::string pyfile = (fs::temp_directory_path() / "agent_create_image.py").string();
             { std::ofstream pf(pyfile); pf << py_script; }
 
-            std::string escaped_path, escaped_color;
-            for (char c : out_path.string()) { if (c == '\'') escaped_path += "'\\''"; else escaped_path.push_back(c); }
-            for (char c : color) { if (c == '\'') escaped_color += "'\\''"; else escaped_color.push_back(c); }
-
-            std::string cmd = std::format("python3 '{}' '{}' {} {} '{}' '{}' 2>&1 || true",
-                                          pyfile, escaped_path, width, height, escaped_color, mode);
+            std::string cmd = std::format("{} {} {} {} {} {} {} 2>&1 || {}",
+                                          sh::py(), sh::q(pyfile), sh::q(out_path.string()), width, height, sh::q(color), sh::q(mode), sh::no_fail());
             ShellResult r = run_shell(cmd, root, 30);
             std::error_code ec;
             if (fs::exists(out_path, ec) && fs::file_size(out_path, ec) > 0) {
@@ -3890,11 +4079,8 @@ print(f'  Alpha: {a}')
             std::string pyfile = (fs::temp_directory_path() / "agent_read_pixel.py").string();
             { std::ofstream pf(pyfile); pf << py_script; }
 
-            std::string escaped_path;
-            for (char c : resolved.string()) { if (c == '\'') escaped_path += "'\\''"; else escaped_path.push_back(c); }
-
-            std::string cmd = std::format("python3 '{}' '{}' {} {} 2>&1 || true",
-                                          pyfile, escaped_path, x, y);
+            std::string cmd = std::format("{} {} {} {} {} 2>&1 || {}",
+                                          sh::py(), sh::q(pyfile), sh::q(resolved.string()), x, y, sh::no_fail());
             ShellResult r = run_shell(cmd, root, 30);
             if (r.exit_code != 0 || r.output.find("ERROR:") != std::string::npos) {
                 return std::format("[error: read_pixel failed]\n{}", r.output);
@@ -3948,12 +4134,8 @@ print(f'OK: set pixel at ({x},{y}) to {color}')
             std::string pyfile = (fs::temp_directory_path() / "agent_draw_pixel.py").string();
             { std::ofstream pf(pyfile); pf << py_script; }
 
-            std::string escaped_path, escaped_color;
-            for (char c : resolved.string()) { if (c == '\'') escaped_path += "'\\''"; else escaped_path.push_back(c); }
-            for (char c : color) { if (c == '\'') escaped_color += "'\\''"; else escaped_color.push_back(c); }
-
-            std::string cmd = std::format("python3 '{}' '{}' {} {} '{}' 2>&1 || true",
-                                          pyfile, escaped_path, x, y, escaped_color);
+            std::string cmd = std::format("{} {} {} {} {} {} 2>&1 || {}",
+                                          sh::py(), sh::q(pyfile), sh::q(resolved.string()), x, y, sh::q(color), sh::no_fail());
             ShellResult r = run_shell(cmd, root, 30);
             if (r.exit_code != 0 || r.output.find("ERROR:") != std::string::npos) {
                 return std::format("[error: draw_pixel failed]\n{}", r.output);
@@ -4016,14 +4198,9 @@ print(f'  fill={fill}, outline={outline}, width={ow}')
             std::string pyfile = (fs::temp_directory_path() / "agent_draw_rect.py").string();
             { std::ofstream pf(pyfile); pf << py_script; }
 
-            std::string escaped_path, escaped_fill, escaped_outline;
-            for (char c : resolved.string()) { if (c == '\'') escaped_path += "'\\''"; else escaped_path.push_back(c); }
-            for (char c : fill) { if (c == '\'') escaped_fill += "'\\''"; else escaped_fill.push_back(c); }
-            for (char c : outline) { if (c == '\'') escaped_outline += "'\\''"; else escaped_outline.push_back(c); }
-
-            std::string cmd = std::format("python3 '{}' '{}' {} {} {} {} '{}' '{}' {} 2>&1 || true",
-                                          pyfile, escaped_path, x1, y1, x2, y2,
-                                          escaped_fill, escaped_outline, outline_width);
+            std::string cmd = std::format("{} {} {} {} {} {} {} {} {} {} 2>&1 || {}",
+                                          sh::py(), sh::q(pyfile), sh::q(resolved.string()), x1, y1, x2, y2,
+                                          sh::q(fill), sh::q(outline), outline_width, sh::no_fail());
             ShellResult r = run_shell(cmd, root, 30);
             if (r.exit_code != 0 || r.output.find("ERROR:") != std::string::npos) {
                 return std::format("[error: draw_rect failed]\n{}", r.output);
@@ -4076,13 +4253,9 @@ print(f'  color={color}, width={lw}')
             std::string pyfile = (fs::temp_directory_path() / "agent_draw_line.py").string();
             { std::ofstream pf(pyfile); pf << py_script; }
 
-            std::string escaped_path, escaped_color;
-            for (char c : resolved.string()) { if (c == '\'') escaped_path += "'\\''"; else escaped_path.push_back(c); }
-            for (char c : color) { if (c == '\'') escaped_color += "'\\''"; else escaped_color.push_back(c); }
-
-            std::string cmd = std::format("python3 '{}' '{}' {} {} {} {} '{}' {} 2>&1 || true",
-                                          pyfile, escaped_path, x1, y1, x2, y2,
-                                          escaped_color, line_width);
+            std::string cmd = std::format("{} {} {} {} {} {} {} {} {} 2>&1 || {}",
+                                          sh::py(), sh::q(pyfile), sh::q(resolved.string()), x1, y1, x2, y2,
+                                          sh::q(color), line_width, sh::no_fail());
             ShellResult r = run_shell(cmd, root, 30);
             if (r.exit_code != 0 || r.output.find("ERROR:") != std::string::npos) {
                 return std::format("[error: draw_line failed]\n{}", r.output);

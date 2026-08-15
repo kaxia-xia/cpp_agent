@@ -9,6 +9,7 @@
 //
 #pragma once
 
+#include <chrono>
 #include <csignal>
 #include <cstdio>
 #include <ctime>
@@ -26,6 +27,7 @@
   #include <windows.h>
   #include <io.h>
 #else
+  #include <sys/ioctl.h>
   #include <termios.h>
   #include <unistd.h>
 #endif
@@ -109,6 +111,43 @@ inline bool enable_flow_control() {
     if (tcsetattr(STDIN_FILENO, TCSANOW, &t) != 0) return false;
     return true;
 #endif
+}
+
+// ── Terminal width (columns) ────────────────────────────────────────
+// POSIX: TIOCGWINSZ ioctl.  Windows: GetConsoleScreenBufferInfo.
+inline int terminal_width(int fallback = 80) {
+#ifdef _WIN32
+    CONSOLE_SCREEN_BUFFER_INFO csbi{};
+    HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (h != INVALID_HANDLE_VALUE && h != nullptr &&
+        GetConsoleScreenBufferInfo(h, &csbi)) {
+        int w = csbi.srWindow.Right - csbi.srWindow.Left + 1;
+        if (w > 0) return w;
+    }
+    return fallback;
+#else
+    struct winsize ws{};
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0)
+        return static_cast<int>(ws.ws_col);
+    return fallback;
+#endif
+}
+
+// ── Format current local time (strftime) ────────────────────────────
+inline std::string format_time_now(const std::string& fmt) {
+    auto now = std::chrono::system_clock::now();
+    std::time_t t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm{};
+    localtime_portable(&t, &tm);
+    char buf[512];
+    if (std::strftime(buf, sizeof(buf), fmt.c_str(), &tm) == 0) return {};
+    return std::string(buf);
+}
+
+// ── Current Unix timestamp (seconds) ────────────────────────────────
+inline long long unix_timestamp_now() {
+    return std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
 } // namespace platform
