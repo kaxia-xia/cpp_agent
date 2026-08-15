@@ -221,9 +221,7 @@ inline void render_table(const Table& t, const Style& s) {
     // Terminal width for wrapping.
     int term_width = 80;
     if (is_tty()) {
-        struct winsize w;
-        if (::ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0)
-            term_width = w.ws_col;
+        term_width = platform::terminal_width(80);
     }
 
     // Check if table fits; if not, cap column widths.

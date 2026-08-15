@@ -70,12 +70,12 @@ inline std::filesystem::path exe_dir() {
 }
 
 // ── Portable localtime ───────────────────────────────────────────────
-// localtime_r (POSIX/MinGW) vs localtime_s (MSVC, reversed arg order).
+// localtime_s (Windows, MSVC + MinGW-w64) vs localtime_r (POSIX).
 inline void localtime_portable(const std::time_t* t, std::tm* out) {
-#if defined(_WIN32) && defined(_MSC_VER)
-    localtime_s(out, t);   // MSVC: (dest, src)
+#ifdef _WIN32
+    localtime_s(out, t);   // Windows: (dest, src)
 #else
-    localtime_r(t, out);   // POSIX + MinGW-w64
+    localtime_r(t, out);   // POSIX
 #endif
 }
 
