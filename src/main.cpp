@@ -108,7 +108,7 @@ FLOW CONTROL
               at prompt: exit the program
 )";
 
-bool is_tty() { return platform::stdout_is_tty(); }
+bool is_tty() { return platform::stdout_is_tty() && platform::ansi_supported(); }
 
 void set_color(std::string_view code) {
     if (is_tty()) std::cout << "\033[" << code << 'm';
@@ -492,7 +492,7 @@ std::string auto_commit(const fs::path& root, std::string_view label,
     std::cerr << "[git] committing changes... " << std::flush;
     reset_color();
     std::string hash = git::commit_changes(root, label, dirty_before);
-    std::cerr << "\r\033[K";
+    if (is_tty()) std::cerr << "\r\033[K";
     std::cerr << std::flush;
     return hash;
 }
@@ -524,6 +524,9 @@ bool read_prompt(std::string& prompt) {
 } // namespace
 
 int main(int argc, char** argv) {
+    // Windows: enable UTF-8 code page + ANSI/VT processing before any output.
+    platform::setup_console();
+
     Config cfg;
     if (!parse_args(argc, argv, cfg)) return 2;
 

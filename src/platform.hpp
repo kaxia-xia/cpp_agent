@@ -26,6 +26,11 @@
   #endif
   #include <windows.h>
   #include <io.h>
+
+  // Older MinGW headers may not define the virtual-terminal flag.
+  #ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
+    #define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
+  #endif
 #else
   #include <sys/ioctl.h>
   #include <termios.h>
@@ -33,6 +38,41 @@
 #endif
 
 namespace platform {
+
+// ── ANSI / console capability ───────────────────────────────────────
+// On Windows the console must have UTF-8 code page and VT processing
+// enabled before ANSI escapes render correctly; otherwise the raw
+// sequences (e.g. "35m") leak through and Chinese text mojibakes.
+inline bool& ansi_available_flag() {
+    static bool v = true;
+    return v;
+}
+
+inline bool ansi_supported() {
+    return ansi_available_flag();
+}
+
+// Must be called once at startup, before any output.
+inline void setup_console() {
+#ifdef _WIN32
+    // 1) UTF-8 code page — fixes Chinese mojibake in PowerShell/cmd.
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+
+    // 2) Enable ANSI/VT escape processing on stdout when it is a console.
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD mode = 0;
+    if (hOut != INVALID_HANDLE_VALUE && hOut != nullptr &&
+        GetConsoleMode(hOut, &mode)) {
+        mode |= ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+        ansi_available_flag() = (SetConsoleMode(hOut, mode) != 0);
+    } else {
+        ansi_available_flag() = false;   // redirected: no ANSI
+    }
+#else
+    ansi_available_flag() = (::isatty(STDOUT_FILENO) != 0);
+#endif
+}
 
 // ── TTY detection ────────────────────────────────────────────────────
 inline bool stdin_is_tty() {

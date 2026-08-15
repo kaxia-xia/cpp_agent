@@ -46,7 +46,7 @@ struct Style {
 };
 
 inline bool is_tty() {
-    static bool tty = platform::stdout_is_tty();
+    static bool tty = platform::stdout_is_tty() && platform::ansi_supported();
     return tty;
 }
 
