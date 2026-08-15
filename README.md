@@ -492,11 +492,13 @@ cmake --install build --prefix /usr/local
 
 ## 🔧 安装依赖（Windows x64）
 
-以下适用于 **Windows 10/11 x64**。全程使用 **纯 Windows 原生工具链**，不依赖 MSYS2 / Cygwin / WSL 等任何类 Unix 环境。两条路线可选：**MinGW-w64（WinLibs）** 或 **MSVC（Visual Studio Build Tools）**，二者都需要用 **vcpkg** 安装 libcurl。
+以下适用于 **Windows 10/11 x64**。全程使用 **纯 Windows 原生工具链**，不依赖 MSYS2 / Cygwin / WSL 等任何类 Unix 环境。两条路线可选：**MinGW-w64（WinLibs）** 或 **MSVC（Visual Studio Build Tools）**。
 
-### 方案一：MinGW-w64（WinLibs）+ vcpkg
+### 方案一：MinGW-w64（WinLibs）+ 官方 curl 包（推荐，最简单）
 
-> WinLibs 是 **MinGW-w64 GCC 的独立便携发行版**（解压即用，只含 `g++`/`gcc`/`windres`/`gdb`/`mingw32-make` 等编译器与工具，**不含 libcurl**）。它本质是原生的 Windows 程序，生成的原生 `.exe` 不依赖任何 POSIX 层。libcurl 需另用 vcpkg 安装。
+> WinLibs 是 **MinGW-w64 GCC 的独立便携发行版**（解压即用，只含 `g++`/`gcc`/`windres`/`gdb`/`mingw32-make` 等编译器与工具，**不含 libcurl**）。它本质是原生的 Windows 程序，生成的原生 `.exe` 不依赖任何 POSIX 层。
+>
+> libcurl 用 **curl 官方 Windows 包** 补齐——curl-for-win 官方 README 明确说明该包包含 `curl.exe`、`libcurl` DLL 以及**静态库（Static libraries）**，MinGW 可直接链接，无需 vcpkg 或从源码编译。
 
 1. 下载 [WinLibs](https://winlibs.com/) 的 **GCC x86_64 UCRT 运行时** 便携版（`.zip` 或 `.7z`），解压到 `C:\mingw64`（解压后应有 `C:\mingw64\bin\g++.exe`），并把 `C:\mingw64\bin` 加入 **PATH**：
 
@@ -505,34 +507,48 @@ set PATH=C:\mingw64\bin;%PATH%
 setx PATH "C:\mingw64\bin;%PATH%"
 ```
 
-2. 安装 [vcpkg](https://github.com/microsoft/vcpkg)（微软官方包管理器，纯 Windows 原生）：
+2. 下载 curl 官方 Windows 包（含 libcurl 开发文件）：
+
+- 固定地址（总是最新版）：https://curl.se/windows/latest.cgi?p=win64-mingw.zip
+- 或指定版本：https://curl.se/windows/dl-8.21.0_7/curl-8.21.0_7-win64-mingw.zip
+
+3. 解压到 `C:\curl`，确认目录结构（关键文件必须存在）：
 
 ```cmd
-git clone https://github.com/microsoft/vcpkg C:\vcpkg
-cd /d C:\vcpkg
-bootstrap-vcpkg.bat
-```
-
-3. 用 vcpkg 编译 libcurl（MinGW 静态库，首次需几分钟从源码编译）：
-
-```cmd
-C:\vcpkg\vcpkg install curl:x64-mingw-static
+C:\curl\include\curl\curl.h      ← 头文件
+C:\curl\lib\libcurl.a            ← 静态库（或 libcurl.dll.a 导入库）
+C:\curl\bin\curl.exe             ← 命令行工具（顺带）
 ```
 
 4. 编译项目（**cmd 或 PowerShell** 均可）：
 
 ```cmd
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/curl
+cmake --build build
+```
+
+产物为 `build\coding-agent.exe`。
+
+> 💡 `-DCMAKE_PREFIX_PATH=C:/curl` 让 CMake 在 `C:\curl\include` 与 `C:\curl\lib` 下找到 libcurl（本项目的 CMake 已内置 fallback 查找逻辑，无需 pkg-config）。若链接时报找不到 DLL，说明用的是动态导入库，改用静态库即可：把 `-DCMAKE_PREFIX_PATH=C:/curl` 保留，并确认 `C:\curl\lib\libcurl.a` 存在。
+
+### 方案二：MinGW-w64 + vcpkg（备选，需从源码编译）
+
+若官方 curl 包结构不符预期，可用 vcpkg 编译 MinGW 版 libcurl：
+
+```cmd
+git clone https://github.com/microsoft/vcpkg C:\vcpkg
+cd /d C:\vcpkg
+bootstrap-vcpkg.bat
+vcpkg install curl:x64-mingw-static
+
+:: 回到项目目录
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ^
       -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake ^
       -DVCPKG_TARGET_TRIPLET=x64-mingw-static
 cmake --build build
 ```
 
-产物为 `build\coding-agent.exe`。
-
-> 💡 vcpkg 的 `x64-mingw-static` triplet 会生成 MinGW 可链接的 `libcurl.a`，CMake 通过 toolchain 文件自动找到它，无需手动指定路径。
-
-### 方案二：Visual Studio Build Tools（MSVC）+ vcpkg（推荐，最省事）
+### 方案三：Visual Studio Build Tools（MSVC）+ vcpkg
 
 > 若不想从源码编译 libcurl，用 MSVC 路线最省事——vcpkg 对 `x64-windows` 提供**官方预编译二进制**，一条命令秒装。
 
