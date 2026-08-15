@@ -504,7 +504,7 @@ bool read_prompt(std::string& prompt) {
     bool got_any = false;
     std::string line;
 
-    while (std::getline(std::cin, line)) {
+    while (platform::read_console_line_utf8(line)) {
         if (line == ".") {
             break;
         }
@@ -513,11 +513,8 @@ bool read_prompt(std::string& prompt) {
         got_any = true;
     }
 
-    if (std::cin.eof()) {
-        std::cin.clear();
-        if (!got_any) return false;
-    }
-
+    // EOF (Ctrl-D / Ctrl-Z on an empty line, or closed stdin): return
+    // false so the caller exits; otherwise submit whatever was entered.
     return got_any;
 }
 

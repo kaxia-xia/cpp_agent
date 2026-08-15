@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <ctime>
 #include <filesystem>
+#include <iostream>
 #include <string>
 
 // ── Windows guard: keep windows.h lean and avoid macro pollution ────
@@ -88,6 +89,68 @@ inline bool stdout_is_tty() {
     return _isatty(_fileno(stdout)) != 0;
 #else
     return ::isatty(STDOUT_FILENO) != 0;
+#endif
+}
+
+// ── UTF-8 console line input ─────────────────────────────────────────
+// Windows: narrow stdin reads (std::cin / ReadConsoleA) are unreliable
+// when the console input code page is CP_UTF8 — conhost drops or mangles
+// multi-byte (non-ASCII) characters, so Chinese text typed in the REPL
+// can be reduced to its ASCII fragments only.  We therefore read the
+// console as wide characters via ReadConsoleW and convert to UTF-8
+// ourselves.  For redirected (non-console) stdin we fall back to the
+// ordinary byte-stream read.
+inline bool read_console_line_utf8(std::string& line) {
+#ifdef _WIN32
+    HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
+    if (hIn != INVALID_HANDLE_VALUE && hIn != nullptr) {
+        DWORD mode = 0;
+        if (GetConsoleMode(hIn, &mode)) {
+            std::wstring wline;
+            wchar_t buf[4096];
+            DWORD read = 0;
+            while (true) {
+                if (!ReadConsoleW(hIn, buf, 4096, &read, nullptr)) {
+                    return false;   // console closed / read error
+                }
+                if (read == 0) {
+                    return false;
+                }
+                wline.append(buf, read);
+                if (!wline.empty() && wline.back() == L'\n') break;
+            }
+            // Strip trailing CR/LF.
+            while (!wline.empty() &&
+                   (wline.back() == L'\n' || wline.back() == L'\r')) {
+                wline.pop_back();
+            }
+            // Windows console EOF marker (Ctrl+Z) → treat as end-of-input.
+            if (wline.size() == 1 && wline[0] == L'\x1A') {
+                return false;
+            }
+            if (wline.empty()) {
+                line.clear();
+                return true;
+            }
+            int n = WideCharToMultiByte(CP_UTF8, 0, wline.data(),
+                                        static_cast<int>(wline.size()),
+                                        nullptr, 0, nullptr, nullptr);
+            if (n <= 0) {
+                line.clear();
+                return true;
+            }
+            line.resize(static_cast<size_t>(n));
+            WideCharToMultiByte(CP_UTF8, 0, wline.data(),
+                                static_cast<int>(wline.size()),
+                                line.data(), n, nullptr, nullptr);
+            return true;
+        }
+    }
+    // Not an interactive console (stdin redirected / piped).
+    return bool(std::getline(std::cin, line));
+#else
+    // POSIX: stdin already delivers UTF-8 bytes; just read a line.
+    return bool(std::getline(std::cin, line));
 #endif
 }
 
