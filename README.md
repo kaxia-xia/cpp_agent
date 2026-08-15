@@ -518,7 +518,7 @@ cmake --build build
 
 产物为 `build\coding-agent.exe`（同目录已有 `libcurl-x64.dll`，可直接运行）。
 
-> 💡 若 `third_party/curl-windows/` 丢失（例如从 git 重新 clone），可运行 `powershell -ExecutionPolicy Bypass -File scripts\setup_curl_windows.ps1` 重新下载补齐。
+> 💡 `third_party/curl-windows/` 已随项目附带（含 curl 官方 Windows 包的 libcurl 开发文件），解压即可用，无需额外下载。
 
 ### 方案二：MinGW-w64 + vcpkg（备选，需从源码编译）
 
@@ -816,11 +816,9 @@ cpp_agent/
 ├── CMakeLists.txt        # 构建配置（C++20，libcurl，Termux 探测，一键安装）
 ├── build/
 │   └── coding-agent      # 编译产物
-├── scripts/
-│   └── setup_curl_windows.ps1   # Windows：一键下载 libcurl 到 third_party/
 ├── third_party/
 │   ├── README.md         # third_party 说明
-│   └── curl-windows/     # Windows libcurl 开发文件（脚本生成，gitignore）
+│   └── curl-windows/     # Windows libcurl 开发文件（已随项目附带）
 └── src/
     ├── main.cpp          # 入口：参数解析、REPL、Agent 循环、系统提示词、终端流控制
     ├── llm.hpp           # OpenAI 兼容 chat-completion 客户端 + tool calling

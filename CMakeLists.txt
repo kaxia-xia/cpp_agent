@@ -70,7 +70,7 @@ endif()
 # ── libcurl ─────────────────────────────────────────────────────────
 # Lookup priority:
 #   1. project-local third_party/curl-windows  (Windows only; shipped in
-#      the zip or fetched by scripts/setup_curl_windows.ps1)
+#      the distribution zip)
 #   2. find_package(CURL) — pkg-config (Linux/Termux) or vcpkg (Windows)
 #   3. manual find_path/find_library fallback (standalone MinGW libcurl)
 #
@@ -111,8 +111,7 @@ endif()
 if(NOT CURL_FOUND)
     message(FATAL_ERROR
         "libcurl development files not found (need curl/curl.h + linkable libcurl).\n"
-        "  Windows: put the official curl package under third_party/curl-windows\n"
-        "    (or run scripts\\setup_curl_windows.ps1).\n"
+        "  Windows: put the official curl package under third_party/curl-windows.\n"
         "  Or use vcpkg:\n"
         "    MSVC:   vcpkg install curl:x64-windows\n"
         "    MinGW:  vcpkg install curl:x64-mingw-static\n"

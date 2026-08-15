@@ -20,7 +20,4 @@ CMake 在 Windows 下会自动查找 `third_party/curl-windows`（见 CMakeLists
 1. 链接 `libcurl.dll.a`（动态导入库，避免静态依赖链）；
 2. 构建后自动把 `bin/libcurl-x64.dll` 复制到 `coding-agent.exe` 同目录。
 
-> **若本目录丢失**（例如从 git 仓库重新 clone，二进制文件不随 git 分发），
-> 在 Windows 上运行项目根目录的
-> `powershell -ExecutionPolicy Bypass -File scripts\setup_curl_windows.ps1`
-> 即可重新下载官方 curl 包并放置到本目录。
+> 本目录已随项目分发包（zip）一起提供，Windows 下解压即可直接编译，无需额外下载。

@@ -17,7 +17,7 @@ compile_commands.json
 *.dylib
 coding-agent
 
-# Third-party Windows binaries (fetched via scripts/setup_curl_windows.ps1)
+# Third-party Windows binaries (shipped in the distribution zip)
 third_party/curl-windows/
 third_party/curl-win64.zip
 third_party/_curl_extract/
