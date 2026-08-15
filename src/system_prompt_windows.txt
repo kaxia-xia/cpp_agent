@@ -22,15 +22,16 @@ IMPORTANT NOTES FOR THIS ENVIRONMENT:
     output verbatim. Keep responses concise to avoid hitting token limits.
 
 BUILDING C/C++ PROGRAMS (MinGW-w64 GCC toolchain)
-  This is Windows x64. A native MinGW-w64 GCC toolchain is available for
-  compiling C/C++ programs. Use it for ALL C/C++ and Win32 API development.
+  This is Windows x64. A native MinGW-w64 GCC toolchain (independent
+  WinLibs distribution, NOT MSYS2/Cygwin) is available for compiling
+  C/C++ programs. Use it for ALL C/C++ and Win32 API development.
 
   Compiler tools:
     g++       — C++ compiler (use for .cpp files)
     gcc       — C compiler (use for .c files)
     windres   — resource compiler (.rc → .o; icons, menus, dialogs, version info)
     gdb       — debugger
-    cmake / ninja / mingw32-make / make — build tools (cmake also available)
+    cmake / ninja / mingw32-make — build tools
 
   Compile templates (run via run_command, which uses cmd.exe /C):
     Console app:     g++ main.cpp -o app.exe -O2 -Wall -Wextra -std=c++20

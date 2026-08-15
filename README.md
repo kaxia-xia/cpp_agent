@@ -13,7 +13,7 @@
 | **Android Termux** ✅ | 主要目标平台，已内置 Termux 前缀探测与 libc++ ABI 适配 |
 | **ARM64 Linux** ✅ | Ubuntu / Debian / Armbian 等普通 ARM64 发行版，零 Android 依赖 |
 | **x64 Linux** ✅ | Ubuntu / Debian / Fedora 等普通 x86_64 发行版，零 Android 依赖 |
-| **Windows x64** ✅ | MSYS2 (MinGW-w64) 或 Visual Studio (MSVC)，零 Android 依赖 |
+| **Windows x64** ✅ | WinLibs (独立 MinGW-w64) 或 Visual Studio (MSVC)，纯 Windows 原生 |
 
 ---
 
@@ -492,32 +492,57 @@ cmake --install build --prefix /usr/local
 
 ## 🔧 安装依赖（Windows x64）
 
-以下适用于 **Windows 10/11 x64**。推荐使用 **MSYS2 + MinGW-w64**（原生 GCC 工具链，与 Linux 构建行为最接近）；也支持 **Visual Studio (MSVC)**。
+以下适用于 **Windows 10/11 x64**。全程使用 **纯 Windows 原生工具链**，不依赖 MSYS2 / Cygwin / WSL 等任何类 Unix 环境。推荐使用 **WinLibs（独立 MinGW-w64 GCC）**，也可使用 **Visual Studio (MSVC)**。
 
-### 方案一：MSYS2 + MinGW-w64（推荐）
+### 方案一：WinLibs 独立 MinGW-w64（推荐）
 
-1. 安装 [MSYS2](https://www.msys2.org/)，打开 **MSYS2 UCRT64** 终端（`C:\msys64\ucrt64.exe`）。
-2. 更新并安装工具链与依赖：
+> WinLibs 是 **MinGW-w64 GCC 的独立便携发行版**，解压即用，自带 `g++`/`gcc`/`windres`/`gdb`/`mingw32-make` 以及 **libcurl 开发库**。它本质就是原生的 Windows 程序，生成的原生 `.exe` 不依赖任何 POSIX 层。
 
-```bash
-pacman -Syu
-pacman -S mingw-w64-ucrt-x86_64-gcc \
-          mingw-w64-ucrt-x86_64-cmake \
-          mingw-w64-ucrt-x86_64-ninja \
-          mingw-w64-ucrt-x86_64-curl \
-          mingw-w64-ucrt-x86_64-git
+1. 下载 [WinLibs](https://winlibs.com/) 的 **GCC x86_64 UCRT 运行时** 便携版（`.zip` 或 `.7z`）。
+2. 解压到固定目录，例如 `C:\mingw64`（解压后应有 `C:\mingw64\bin\g++.exe`）。
+3. 把 `C:\mingw64\bin` 加入 **PATH**：
+
+```cmd
+:: cmd（当前会话）
+set PATH=C:\mingw64\bin;%PATH%
+
+:: 永久生效
+setx PATH "C:\mingw64\bin;%PATH%"
 ```
 
-3. 编译：
+```powershell
+# PowerShell（当前会话）
+$env:Path = "C:\mingw64\bin;$env:Path"
 
-```bash
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+# 永久生效
+[Environment]::SetEnvironmentVariable("Path", "C:\mingw64\bin;" + $env:Path, "User")
+```
+
+4. 验证编译器：
+
+```cmd
+g++ --version
+gcc --version
+curl --version
+```
+
+5. 安装 [CMake](https://cmake.org/download/)（官方 Windows 安装包）和 [Ninja](https://ninja-build.org/)（可选，官方 Windows zip 解压到 PATH 即可）。
+
+6. 编译项目（在 **cmd 或 PowerShell** 中均可）：
+
+```cmd
+:: 使用 Ninja
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/mingw64
+cmake --build build
+
+:: 或使用 WinLibs 自带的 mingw32-make
+cmake -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/mingw64
 cmake --build build
 ```
 
-产物为 `build/coding-agent.exe`。
+产物为 `build\coding-agent.exe`。
 
-> 💡 若使用 **MINGW64** 终端，把包名中的 `ucrt` 换成 `mingw-w64-x86_64-*` 即可（如 `mingw-w64-x86_64-gcc`）。
+> 💡 `-DCMAKE_PREFIX_PATH=C:/mingw64` 让 CMake 定位到 WinLibs 自带的 libcurl（头文件与库）。
 
 ### 方案二：Visual Studio (MSVC)
 
@@ -544,7 +569,7 @@ cmake --build build --config Release
 ### 一键安装
 
 ```powershell
-# MSYS2 / MinGW
+# MinGW (WinLibs)
 cmake --install build            # 默认安装到 %USERPROFILE%\.local\bin
 
 # 或指定目录
@@ -555,11 +580,11 @@ cmake --install build --prefix C:\tools\coding-agent
 
 ### Windows x64 下开发 C/C++ / Win32 程序
 
-在 MSYS2 环境（UCRT64 / MINGW64 终端）中，MinGW-w64 工具链开箱即用，可直接编译 C/C++ 与 Win32 API 程序，无需额外安装。
+使用 **独立 MinGW-w64（WinLibs）** 工具链，在 cmd / PowerShell 中即可直接编译 C/C++ 与 Win32 API 程序，无需任何类 Unix 环境。
 
 **编译命令示例**
 
-```bash
+```cmd
 # 控制台程序
 g++ main.cpp -o app.exe -O2 -Wall -Wextra -std=c++20
 
