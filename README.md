@@ -553,6 +553,58 @@ cmake --install build --prefix C:\tools\coding-agent
 
 > 💡 Windows 下 `run_command` 通过 `cmd.exe /C` 执行命令；终端流控（Ctrl+S/Ctrl+Q）与 `/dev/tty` 实时镜像在 Windows 上不可用，程序会自动降级。Termux 专属工具（`notify`/`clipboard`/`vibrate`/`screenshot`/`system_info`/`get_location`）在 Windows 上不可用，调用时返回错误提示（不会崩溃）。
 
+### Windows x64 下开发 C/C++ / Win32 程序
+
+在 MSYS2 环境（UCRT64 / MINGW64 终端）中，MinGW-w64 工具链开箱即用，可直接编译 C/C++ 与 Win32 API 程序，无需额外安装。
+
+**编译命令示例**
+
+```bash
+# 控制台程序
+g++ main.cpp -o app.exe -O2 -Wall -Wextra -std=c++20
+
+# C 控制台程序
+gcc main.c -o app.exe -O2 -Wall -std=c17
+
+# GUI 窗口程序（Win32，不弹黑框）
+g++ main.cpp -o app.exe -O2 -mwindows -lgdi32 -luser32 -lkernel32 -lcomctl32 -lshell32
+
+# 宽字符版 Win32（wWinMain + L"..." 字符串）
+g++ main.cpp -o app.exe -O2 -municode -mwindows -lgdi32 -luser32
+
+# 带资源文件（图标/菜单/对话框/版本信息）
+windres app.rc -o app_res.o && g++ main.cpp app_res.o -o app.exe -mwindows -lgdi32 -luser32 -lcomctl32
+
+# 多文件
+g++ a.cpp b.cpp c.cpp -o app.exe -O2 -std=c++20
+```
+
+**常用 Win32 链接库**
+
+| 链接库 | 用途 |
+|--------|------|
+| `-luser32` | 窗口/控件/输入（`CreateWindow`、`MessageBox`、`GetMessage`） |
+| `-lgdi32` | GDI 绘图（`Rectangle`、`TextOut`、`CreatePen`、`SelectObject`） |
+| `-lcomctl32` | 通用控件（ListView、TreeView、Toolbar） |
+| `-lshell32` | Shell 操作（`ShellExecuteW`、`SHGetFolderPath`） |
+| `-lcomdlg32` | 通用对话框（`GetOpenFileName`、`ChooseColor`） |
+| `-lole32` | OLE/COM（`CoInitialize`、`CoCreateInstance`） |
+| `-lws2_32` | Winsock 网络（`socket`、`connect`、`send`） |
+| `-ladvapi32` | 注册表与安全（`RegOpenKeyEx`） |
+| `-lwinmm` | 多媒体（`PlaySound`、`timeBeginPeriod`） |
+| `-luuid` | GUID 定义（常与 COM 一起用） |
+
+**命令行环境说明**
+
+agent 在 Windows 上的 `run_command` 走 `cmd.exe /C`，因此编译命令需使用 cmd 语法：
+
+- ✅ 支持：`&&`、`|`、`>`、`>>`、`%VAR%`、`set VAR=...`
+- ❌ 不支持（bash 语法会失败）：`$(...)`、反引号、`export`、`$VAR`、heredoc
+- 运行程序：cmd 下 `app.exe`，PowerShell 下 `.\app.exe`
+- 路径：`C:\dir\file` 或 `C:/dir/file` 均可，含空格需加引号
+
+> 💡 MinGW-w64 默认产出原生 64 位 Windows `.exe`。
+
 ---
 
 ## ⚙️ 配置 API 密钥

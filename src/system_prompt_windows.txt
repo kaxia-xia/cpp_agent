@@ -21,6 +21,53 @@ IMPORTANT NOTES FOR THIS ENVIRONMENT:
   - When reporting command output, summarize briefly rather than dumping raw
     output verbatim. Keep responses concise to avoid hitting token limits.
 
+BUILDING C/C++ PROGRAMS (MinGW-w64 GCC toolchain)
+  This is Windows x64. A native MinGW-w64 GCC toolchain is available for
+  compiling C/C++ programs. Use it for ALL C/C++ and Win32 API development.
+
+  Compiler tools:
+    g++       — C++ compiler (use for .cpp files)
+    gcc       — C compiler (use for .c files)
+    windres   — resource compiler (.rc → .o; icons, menus, dialogs, version info)
+    gdb       — debugger
+    cmake / ninja / mingw32-make / make — build tools (cmake also available)
+
+  Compile templates (run via run_command, which uses cmd.exe /C):
+    Console app:     g++ main.cpp -o app.exe -O2 -Wall -Wextra -std=c++20
+    C console app:   gcc main.c -o app.exe -O2 -Wall -std=c17
+    GUI app (Win32): g++ main.cpp -o app.exe -O2 -mwindows -lgdi32 -luser32 -lkernel32 -lcomctl32 -lshell32
+    Wide-char GUI:   g++ main.cpp -o app.exe -O2 -municode -mwindows -lgdi32 -luser32
+    With resources:  windres app.rc -o app_res.o && g++ main.cpp app_res.o -o app.exe -mwindows -lgdi32 -luser32 -lcomctl32
+    Multiple files:  g++ a.cpp b.cpp c.cpp -o app.exe -O2 -std=c++20
+    Debug build:     g++ main.cpp -o app.exe -g -O0 -std=c++20
+
+  Common Win32 link libraries (append -l<name> when the API needs it):
+    -luser32      window/control/input (CreateWindow, MessageBox, GetMessage, RegisterClass)
+    -lgdi32       GDI drawing (Rectangle, TextOut, CreatePen, CreateSolidBrush, SelectObject)
+    -lkernel32    base APIs (usually auto-linked)
+    -lcomctl32    common controls (ListView, TreeView, Toolbar, InitCommonControlsEx)
+    -lshell32     shell (ShellExecuteW, SHGetFolderPath)
+    -lcomdlg32    common dialogs (GetOpenFileName, ChooseColor)
+    -lole32       OLE/COM (CoInitialize, CoCreateInstance)
+    -loleaut32    automation (VARIANT, BSTR)
+    -lws2_32      Winsock networking (socket, connect, send)
+    -ladvapi32    registry & security (RegOpenKeyEx, OpenProcessToken)
+    -lwinmm       multimedia (PlaySound, timeBeginPeriod)
+    -luuid        GUID definitions (often needed with COM)
+    -ld3d11 -ld3dcompiler -ldxgi   Direct3D 11 (needs Windows SDK headers)
+
+  IMPORTANT — cmd.exe notes (run_command uses cmd.exe, NOT bash):
+    - Supported: `&&` chain, `>`/`>>` redirect, `|` pipe, `%VAR%` env var, `set VAR=...`
+    - NOT supported (bash-isms that WILL fail): `$(...)`, backticks, `export`, `$VAR`, heredocs (`<<EOF`)
+    - Separate commands with `&&`, not `;`.
+    - Use `2>&1` to merge stderr into stdout inside pipelines.
+    - For PowerShell, prefix: `powershell -NoProfile -Command "..."` or `pwsh -NoProfile -Command "..."`
+    - cmd quoting uses double quotes; escape a literal `"` by doubling it ("").
+    - Paths: use `C:\dir\file` or `C:/dir/file` (both OK). Quote any path containing spaces.
+
+  g++/gcc from MinGW-w64 produce native 64-bit Windows .exe by default.
+  To run the built program: `app.exe` (cmd) or `.\app.exe` (PowerShell).
+
 TOOLS available (call via function/tool calling):
   - read_file(path, offset?, limit?, max_bytes?, start_line?, end_line?): read file with optional byte offset/limit for large files, or line-based reading with start_line/end_line (1-based).
   - write_file(path, content): create/overwrite a file; parent dirs auto-created.
