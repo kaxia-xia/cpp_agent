@@ -492,75 +492,65 @@ cmake --install build --prefix /usr/local
 
 ## 🔧 安装依赖（Windows x64）
 
-以下适用于 **Windows 10/11 x64**。全程使用 **纯 Windows 原生工具链**，不依赖 MSYS2 / Cygwin / WSL 等任何类 Unix 环境。推荐使用 **WinLibs（独立 MinGW-w64 GCC）**，也可使用 **Visual Studio (MSVC)**。
+以下适用于 **Windows 10/11 x64**。全程使用 **纯 Windows 原生工具链**，不依赖 MSYS2 / Cygwin / WSL 等任何类 Unix 环境。两条路线可选：**MinGW-w64（WinLibs）** 或 **MSVC（Visual Studio Build Tools）**，二者都需要用 **vcpkg** 安装 libcurl。
 
-### 方案一：WinLibs 独立 MinGW-w64（推荐）
+### 方案一：MinGW-w64（WinLibs）+ vcpkg
 
-> WinLibs 是 **MinGW-w64 GCC 的独立便携发行版**，解压即用，自带 `g++`/`gcc`/`windres`/`gdb`/`mingw32-make` 以及 **libcurl 开发库**。它本质就是原生的 Windows 程序，生成的原生 `.exe` 不依赖任何 POSIX 层。
+> WinLibs 是 **MinGW-w64 GCC 的独立便携发行版**（解压即用，只含 `g++`/`gcc`/`windres`/`gdb`/`mingw32-make` 等编译器与工具，**不含 libcurl**）。它本质是原生的 Windows 程序，生成的原生 `.exe` 不依赖任何 POSIX 层。libcurl 需另用 vcpkg 安装。
 
-1. 下载 [WinLibs](https://winlibs.com/) 的 **GCC x86_64 UCRT 运行时** 便携版（`.zip` 或 `.7z`）。
-2. 解压到固定目录，例如 `C:\mingw64`（解压后应有 `C:\mingw64\bin\g++.exe`）。
-3. 把 `C:\mingw64\bin` 加入 **PATH**：
+1. 下载 [WinLibs](https://winlibs.com/) 的 **GCC x86_64 UCRT 运行时** 便携版（`.zip` 或 `.7z`），解压到 `C:\mingw64`（解压后应有 `C:\mingw64\bin\g++.exe`），并把 `C:\mingw64\bin` 加入 **PATH**：
 
 ```cmd
-:: cmd（当前会话）
 set PATH=C:\mingw64\bin;%PATH%
-
-:: 永久生效
 setx PATH "C:\mingw64\bin;%PATH%"
 ```
 
-```powershell
-# PowerShell（当前会话）
-$env:Path = "C:\mingw64\bin;$env:Path"
-
-# 永久生效
-[Environment]::SetEnvironmentVariable("Path", "C:\mingw64\bin;" + $env:Path, "User")
-```
-
-4. 验证编译器：
+2. 安装 [vcpkg](https://github.com/microsoft/vcpkg)（微软官方包管理器，纯 Windows 原生）：
 
 ```cmd
-g++ --version
-gcc --version
-curl --version
+git clone https://github.com/microsoft/vcpkg C:\vcpkg
+cd /d C:\vcpkg
+bootstrap-vcpkg.bat
 ```
 
-5. 安装 [CMake](https://cmake.org/download/)（官方 Windows 安装包）和 [Ninja](https://ninja-build.org/)（可选，官方 Windows zip 解压到 PATH 即可）。
-
-6. 编译项目（在 **cmd 或 PowerShell** 中均可）：
+3. 用 vcpkg 编译 libcurl（MinGW 静态库，首次需几分钟从源码编译）：
 
 ```cmd
-:: 使用 Ninja
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/mingw64
-cmake --build build
+C:\vcpkg\vcpkg install curl:x64-mingw-static
+```
 
-:: 或使用 WinLibs 自带的 mingw32-make
-cmake -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/mingw64
+4. 编译项目（**cmd 或 PowerShell** 均可）：
+
+```cmd
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ^
+      -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake ^
+      -DVCPKG_TARGET_TRIPLET=x64-mingw-static
 cmake --build build
 ```
 
 产物为 `build\coding-agent.exe`。
 
-> 💡 `-DCMAKE_PREFIX_PATH=C:/mingw64` 让 CMake 定位到 WinLibs 自带的 libcurl（头文件与库）。
+> 💡 vcpkg 的 `x64-mingw-static` triplet 会生成 MinGW 可链接的 `libcurl.a`，CMake 通过 toolchain 文件自动找到它，无需手动指定路径。
 
-### 方案二：Visual Studio (MSVC)
+### 方案二：Visual Studio Build Tools（MSVC）+ vcpkg（推荐，最省事）
 
-1. 安装 [Visual Studio 2022](https://visualstudio.microsoft.com/)（勾选「使用 C++ 的桌面开发」）与 [CMake](https://cmake.org/)。
-2. 安装 libcurl：推荐 [vcpkg](https://vcpkg.io/)：
+> 若不想从源码编译 libcurl，用 MSVC 路线最省事——vcpkg 对 `x64-windows` 提供**官方预编译二进制**，一条命令秒装。
 
-```powershell
-git clone https://github.com/Microsoft/vcpkg.git
-cd vcpkg
-.\bootstrap-vcpkg.bat
+1. 安装 **Visual Studio Build Tools 2022**（免费，只需勾选「使用 C++ 的桌面开发」工作负载，无需完整 VS IDE）：https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022
+2. 安装 [vcpkg](https://github.com/microsoft/vcpkg)：
+
+```cmd
+git clone https://github.com/microsoft/vcpkg C:\vcpkg
+cd /d C:\vcpkg
+bootstrap-vcpkg.bat
 .\vcpkg install curl:x64-windows
 ```
 
-3. 用 vcpkg 工具链编译：
+3. 用 vcpkg 工具链编译（在「x64 Native Tools Command Prompt for VS 2022」或 PowerShell 中）：
 
 ```powershell
 cmake -B build -DCMAKE_BUILD_TYPE=Release `
-      -DCMAKE_TOOLCHAIN_FILE=C:\path\to\vcpkg\scripts\buildsystems\vcpkg.cmake
+      -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
 cmake --build build --config Release
 ```
 
