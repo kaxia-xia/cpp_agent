@@ -16,14 +16,14 @@
 // All output goes to std::cout. No external dependencies.
 #pragma once
 
+#include "platform.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <string_view>
-#include <sys/ioctl.h>
-#include <unistd.h>
 #include <vector>
 
 namespace markdown {
@@ -46,7 +46,7 @@ struct Style {
 };
 
 inline bool is_tty() {
-    static bool tty = ::isatty(STDOUT_FILENO) != 0;
+    static bool tty = platform::stdout_is_tty();
     return tty;
 }
 

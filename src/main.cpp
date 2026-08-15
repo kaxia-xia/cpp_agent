@@ -13,6 +13,7 @@
 #include "tools.hpp"
 #include "context.hpp"
 #include "git.hpp"
+#include "platform.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -24,14 +25,11 @@
 #include <iostream>
 #include <optional>
 #include <set>
-#include <signal.h>
 #include <sstream>
 #include <stdexcept>
-#include <termios.h>
 #include <string>
 #include <string_view>
 #include <thread>
-#include <unistd.h>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -52,24 +50,6 @@ extern "C" void handle_sigint(int) {
 }
 
 namespace {
-
-// ── Pause/Resume (Ctrl+S / Ctrl+Q) ───────────────────────────────────
-//
-// We use the kernel's built-in IXON flow control.  No raw mode,
-// no background thread, no interference with stdin.
-// Just ensure IXON is enabled on the terminal.
-bool ensure_ixon() {
-    if (!isatty(STDIN_FILENO)) return false;
-    struct termios t;
-    if (tcgetattr(STDIN_FILENO, &t) != 0) return false;
-    if (t.c_iflag & IXON) return true;  // already enabled
-
-    t.c_iflag |= IXON;
-    t.c_cc[VSTART] = 0x11;  // Ctrl+Q
-    t.c_cc[VSTOP]  = 0x13;  // Ctrl+S
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &t) != 0) return false;
-    return true;
-}
 
 // ── Config & helpers ─────────────────────────────────────────────────
 
@@ -128,7 +108,7 @@ FLOW CONTROL
               at prompt: exit the program
 )";
 
-bool is_tty() { return ::isatty(STDOUT_FILENO) != 0; }
+bool is_tty() { return platform::stdout_is_tty(); }
 
 void set_color(std::string_view code) {
     if (is_tty()) std::cout << "\033[" << code << 'm';
@@ -285,14 +265,8 @@ std::string resolve_api_key(const Config& cfg, const llm::Provider& p) {
 }
 
 // Resolve the directory containing the running executable.
-// Uses /proc/self/exe on Linux; falls back to argv[0] otherwise.
-fs::path exe_dir() {
-    std::error_code ec;
-    fs::path exe = fs::read_symlink("/proc/self/exe", ec);
-    if (!ec) return exe.parent_path();
-    // Fallback: not ideal when launched via PATH, but better than nothing.
-    return fs::current_path();
-}
+// Delegated to platform::exe_dir() (Linux: /proc/self/exe; Windows: GetModuleFileNameA).
+fs::path exe_dir() { return platform::exe_dir(); }
 
 // Read the system prompt from system_prompt.txt (located next to the
 // executable binary) and substitute the workspace root.
@@ -558,17 +532,11 @@ int main(int argc, char** argv) {
     // HTTP request via libcurl's progress callback and causes run_turn
     // to return early.  At the prompt: Ctrl+C will be caught after
     // read_prompt returns (it will see g_interrupted and exit).
-    struct sigaction sa{};
-    sa.sa_handler = handle_sigint;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
-    sigaction(SIGINT, &sa, nullptr);
+    platform::install_sigint(handle_sigint);
 
     // ── Terminal flow control (Ctrl+S / Ctrl+Q) ───────────────────
-    bool has_flow_control = false;
-    if (isatty(STDIN_FILENO)) {
-        has_flow_control = ensure_ixon();
-    }
+    // POSIX: enables kernel IXON flow control.  Windows: unavailable.
+    bool has_flow_control = platform::enable_flow_control();
 
     llm::Provider provider;
     if (auto* p = llm::find_provider(cfg.provider_name)) {

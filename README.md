@@ -1,8 +1,8 @@
 # coding-agent — 自主编程助手
 
-> **适用于 Android Termux 和 ARM64 Linux 的 AI 编程助手**，由 DeepSeek / 智谱 GLM 等大模型驱动，在终端中自主完成代码编写、重构、调试等任务。
+> **适用于 Android Termux、x64/ARM64 Linux 和 Windows x64 的 AI 编程助手**，由 DeepSeek / 智谱 GLM 等大模型驱动，在终端中自主完成代码编写、重构、调试等任务。
 
-本项目是一个运行在终端中的自主软件工程助手（autonomous coding agent）。它使用 C++20 编写，**零第三方运行时依赖**（仅需 libcurl），自带 JSON 解析器、HTTP 客户端和工具调度引擎，可在 Termux 和普通 ARM64 Linux 上流畅运行。
+本项目是一个运行在终端中的自主软件工程助手（autonomous coding agent）。它使用 C++20 编写，**零第三方运行时依赖**（仅需 libcurl），自带 JSON 解析器、HTTP 客户端和工具调度引擎，可在 Termux、普通 Linux（x64 / ARM64）和 Windows x64 上流畅运行。
 
 ---
 
@@ -12,6 +12,8 @@
 |------|------|
 | **Android Termux** ✅ | 主要目标平台，已内置 Termux 前缀探测与 libc++ ABI 适配 |
 | **ARM64 Linux** ✅ | Ubuntu / Debian / Armbian 等普通 ARM64 发行版，零 Android 依赖 |
+| **x64 Linux** ✅ | Ubuntu / Debian / Fedora 等普通 x86_64 发行版，零 Android 依赖 |
+| **Windows x64** ✅ | MSYS2 (MinGW-w64) 或 Visual Studio (MSVC)，零 Android 依赖 |
 
 ---
 
@@ -420,9 +422,9 @@ cmake -B build -DCMAKE_INSTALL_PREFIX=/opt/coding-agent && cmake --build build &
 
 ---
 
-## 🔧 安装依赖（普通 ARM64 Linux）
+## 🔧 安装依赖（普通 Linux）
 
-以下适用于 **Ubuntu 22.04+ / Debian 12+ / Armbian** 等普通 ARM64 Linux 发行版（非 Android）。
+以下适用于 **Ubuntu 22.04+ / Debian 12+ / Fedora** 等普通 Linux 发行版（非 Android），**x86_64 与 ARM64 通用**。构建系统会根据 `__ANDROID__` 宏自动区分 Termux 与普通 Linux，无需额外配置。
 
 ### 1️⃣ 基础编译依赖
 
@@ -485,6 +487,71 @@ cmake --install build --prefix /usr/local
 ```
 
 > 💡 CMake 在非 Termux 环境下不会设置 `$PREFIX` 路径，构建系统会自动跳过 Termux 特有的 RPATH 配置，使用标准 Linux 库搜索路径。
+
+---
+
+## 🔧 安装依赖（Windows x64）
+
+以下适用于 **Windows 10/11 x64**。推荐使用 **MSYS2 + MinGW-w64**（原生 GCC 工具链，与 Linux 构建行为最接近）；也支持 **Visual Studio (MSVC)**。
+
+### 方案一：MSYS2 + MinGW-w64（推荐）
+
+1. 安装 [MSYS2](https://www.msys2.org/)，打开 **MSYS2 UCRT64** 终端（`C:\msys64\ucrt64.exe`）。
+2. 更新并安装工具链与依赖：
+
+```bash
+pacman -Syu
+pacman -S mingw-w64-ucrt-x86_64-gcc \
+          mingw-w64-ucrt-x86_64-cmake \
+          mingw-w64-ucrt-x86_64-ninja \
+          mingw-w64-ucrt-x86_64-curl \
+          mingw-w64-ucrt-x86_64-git
+```
+
+3. 编译：
+
+```bash
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+产物为 `build/coding-agent.exe`。
+
+> 💡 若使用 **MINGW64** 终端，把包名中的 `ucrt` 换成 `mingw-w64-x86_64-*` 即可（如 `mingw-w64-x86_64-gcc`）。
+
+### 方案二：Visual Studio (MSVC)
+
+1. 安装 [Visual Studio 2022](https://visualstudio.microsoft.com/)（勾选「使用 C++ 的桌面开发」）与 [CMake](https://cmake.org/)。
+2. 安装 libcurl：推荐 [vcpkg](https://vcpkg.io/)：
+
+```powershell
+git clone https://github.com/Microsoft/vcpkg.git
+cd vcpkg
+.\bootstrap-vcpkg.bat
+.\vcpkg install curl:x64-windows
+```
+
+3. 用 vcpkg 工具链编译：
+
+```powershell
+cmake -B build -DCMAKE_BUILD_TYPE=Release `
+      -DCMAKE_TOOLCHAIN_FILE=C:\path\to\vcpkg\scripts\buildsystems\vcpkg.cmake
+cmake --build build --config Release
+```
+
+产物为 `build\Release\coding-agent.exe`。
+
+### 一键安装
+
+```powershell
+# MSYS2 / MinGW
+cmake --install build            # 默认安装到 %USERPROFILE%\.local\bin
+
+# 或指定目录
+cmake --install build --prefix C:\tools\coding-agent
+```
+
+> 💡 Windows 下 `run_command` 通过 `cmd.exe /C` 执行命令；终端流控（Ctrl+S/Ctrl+Q）与 `/dev/tty` 实时镜像在 Windows 上不可用，程序会自动降级。Termux 专属工具（`notify`/`clipboard`/`vibrate`/`screenshot`/`system_info`/`get_location`）在 Windows 上不可用，调用时返回错误提示（不会崩溃）。
 
 ---
 

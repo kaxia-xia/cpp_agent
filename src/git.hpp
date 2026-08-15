@@ -9,6 +9,7 @@
 //
 #pragma once
 
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
@@ -24,13 +25,19 @@ namespace fs = std::filesystem;
 
 // ── helpers ──────────────────────────────────────────────────────────
 
-// Escape a string for safe use inside a Bourne-shell single-quoted string.
-// The strategy: end the single-quote, emit the literal char escaped with
-// backslash, then resume single-quoting.  This is the only portable way to
-// embed any character inside a single-quoted shell string.
-inline std::string shell_escape(std::string_view s) {
+// Quote a string so it survives a trip through the platform shell.
+//   POSIX (sh/bash): single-quote with the "'\''" trick.
+//   Windows (cmd):   double-quote.  Windows filenames cannot contain '"',
+//                    so no embedded-quote escaping is needed.
+inline std::string shell_quote(std::string_view s) {
     std::string out;
     out.reserve(s.size() + 8);
+#ifdef _WIN32
+    out.push_back('"');
+    for (char c : s) out.push_back(c);
+    out.push_back('"');
+#else
+    out.push_back('\'');
     for (char c : s) {
         if (c == '\'') {
             // "'" → '\''  (end quote, escaped quote, resume quote)
@@ -39,6 +46,8 @@ inline std::string shell_escape(std::string_view s) {
             out.push_back(c);
         }
     }
+    out.push_back('\'');
+#endif
     return out;
 }
 
@@ -51,14 +60,28 @@ inline std::string shell_escape(std::string_view s) {
 inline std::pair<int, std::string> run_git(const fs::path& cwd,
                                             std::string_view args) {
     // Quote the directory path so spaces and special chars are safe.
-    std::string cmd = std::format("cd '{}' && git -c core.quotePath=false {} 2>&1",
-                                  shell_escape(cwd.string()), args);
+    // Windows cmd needs `cd /d`; POSIX sh uses plain `cd`.
+#ifdef _WIN32
+    std::string cmd = std::format("cd /d {} && git -c core.quotePath=false {} 2>&1",
+                                  shell_quote(cwd.string()), args);
+#else
+    std::string cmd = std::format("cd {} && git -c core.quotePath=false {} 2>&1",
+                                  shell_quote(cwd.string()), args);
+#endif
+#ifdef _WIN32
+    FILE* fp = ::_popen(cmd.c_str(), "r");
+#else
     FILE* fp = ::popen(cmd.c_str(), "r");
+#endif
     if (!fp) return {-1, "popen failed"};
     std::string out;
     char buf[4096];
     while (::fgets(buf, sizeof(buf), fp)) out += buf;
+#ifdef _WIN32
+    int rc = ::_pclose(fp);
+#else
     int rc = ::pclose(fp);
+#endif
     return {rc, out};
 }
 
@@ -217,7 +240,7 @@ inline std::string commit_changes(const fs::path& root, std::string_view label,
     std::string add_args;
     for (const auto& f : agent_changed) {
         if (!add_args.empty()) add_args += ' ';
-        add_args += shell_escape(f);
+        add_args += shell_quote(f);
     }
 
     auto [rc_add, out_add] = run_git(root, std::format("add -- {}", add_args));
@@ -237,9 +260,9 @@ inline std::string commit_changes(const fs::path& root, std::string_view label,
     // Truncate to a reasonable length.
     if (msg.size() > 80) msg = msg.substr(0, 80) + "...";
 
-    // Use shell-escaped message with -m to handle special characters safely.
+    // Use shell-quoted message with -m to handle special characters safely.
     auto [rc_cm, out_cm] = run_git(root,
-        std::format("commit -m '{}'", shell_escape(msg)));
+        std::format("commit -m {}", shell_quote(msg)));
     if (rc_cm != 0) {
         std::cerr << std::format("[git] warning: commit failed: {}\n", out_cm);
         return {};

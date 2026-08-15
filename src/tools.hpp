@@ -2,6 +2,7 @@
 #pragma once
 
 #include "json.hpp"
+#include "platform.hpp"
 
 #include <algorithm>
 #include <array>
@@ -12,26 +13,39 @@
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
-#include <fcntl.h>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <iomanip>
 #include <ranges>
-#include <spawn.h>
 #include <sstream>
 #include <string>
 #include <string_view>
-#include <sys/select.h>
-#include <sys/wait.h>
-#include <unistd.h>
 #include <vector>
 
+#ifdef _WIN32
+  // windows.h is pulled in via platform.hpp; nothing extra needed here.
+#else
+  #include <fcntl.h>
+  #include <spawn.h>
+  #include <sys/select.h>
+  #include <sys/wait.h>
+  #include <unistd.h>
+#endif
+
+#ifndef _WIN32
 extern char** environ;
+#endif
 
 namespace tools {
 
 namespace fs = std::filesystem;
+
+#ifdef _WIN32
+constexpr char kPathSep = '\\';
+#else
+constexpr char kPathSep = '/';
+#endif
 
 struct ToolError : std::runtime_error {
     explicit ToolError(std::string msg) : std::runtime_error(std::move(msg)) {}
@@ -61,7 +75,7 @@ inline fs::path resolve_under_root(const fs::path& root, std::string_view path) 
     // This catches the vast majority of cases without touching the
     // filesystem at all, and is immune to symlink weirdness.
     std::string root_str = root.string();
-    if (!root_str.empty() && root_str.back() != '/') root_str += '/';
+    if (!root_str.empty() && root_str.back() != kPathSep) root_str += kPathSep;
 
     // Lexically normalize the path first to handle ".." and ".".
     fs::path lex = full.lexically_normal();
@@ -95,8 +109,8 @@ inline fs::path resolve_under_root(const fs::path& root, std::string_view path) 
         // If relative() fails, compare string prefixes as a fallback.
         std::string canon_str = canon.string();
         std::string root_canon_str = root_canon.string();
-        if (!root_canon_str.empty() && root_canon_str.back() != '/')
-            root_canon_str += '/';
+        if (!root_canon_str.empty() && root_canon_str.back() != kPathSep)
+            root_canon_str += kPathSep;
         if (canon_str.starts_with(root_canon_str) || canon_str == root_canon.string()) {
             return canon;
         }
@@ -114,6 +128,124 @@ struct ShellResult {
     std::string output;
     bool timed_out = false;
 };
+
+#ifdef _WIN32
+
+// Convert UTF-8 std::string_view to a wide string for CreateProcessW.
+inline std::wstring to_wide(std::string_view s) {
+    if (s.empty()) return {};
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
+    std::wstring w(static_cast<size_t>(n), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), w.data(), n);
+    return w;
+}
+
+inline ShellResult run_shell(std::string_view cmd, const fs::path& cwd, int timeout_seconds) {
+    // ── Windows: CreateProcessW + anonymous pipe + cmd.exe /C ──────
+    SECURITY_ATTRIBUTES sa{};
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    sa.lpSecurityDescriptor = nullptr;
+
+    HANDLE rd = nullptr, wr = nullptr;
+    if (!CreatePipe(&rd, &wr, &sa, 0)) {
+        throw ToolError(std::format("CreatePipe failed: GetLastError={}", GetLastError()));
+    }
+    // The read end must NOT be inherited by the child.
+    SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
+
+    // Child stdin: NUL device (the Windows equivalent of /dev/null).
+    HANDLE nul = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ, &sa,
+                             OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+
+    // cmd.exe /C "<command>".  The working directory is passed via
+    // lpCurrentDirectory so no `cd` prefix is needed.
+    std::wstring cmdline = L"cmd.exe /C \"" + to_wide(cmd) + L"\"";
+
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput  = nul ? nul : GetStdHandle(STD_INPUT_HANDLE);
+    si.hStdOutput = wr;
+    si.hStdError  = wr;
+
+    PROCESS_INFORMATION pi{};
+    std::wstring wcwd = cwd.wstring();
+    BOOL ok = CreateProcessW(nullptr, cmdline.data(), nullptr, nullptr, TRUE,
+                             0, nullptr,
+                             wcwd.empty() ? nullptr : wcwd.c_str(),
+                             &si, &pi);
+    CloseHandle(wr);                 // parent keeps only the read end
+    if (nul) CloseHandle(nul);
+    if (!ok) {
+        DWORD err = GetLastError();
+        CloseHandle(rd);
+        throw ToolError(std::format("CreateProcessW failed: GetLastError={}", err));
+    }
+    CloseHandle(pi.hThread);
+
+    // Real-time console mirror via CONOUT$ (like /dev/tty on POSIX).
+    // This fails gracefully when there is no console (redirected/daemon).
+    HANDLE console = CreateFileW(L"CONOUT$", GENERIC_WRITE, FILE_SHARE_WRITE,
+                                 nullptr, OPEN_EXISTING, 0, nullptr);
+
+    ShellResult result;
+    std::string buf;
+    std::array<char, 4096> chunk{};
+    bool timed_out = false;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeout_seconds);
+
+    while (true) {
+        // Drain whatever data is currently available on the pipe.
+        DWORD avail = 0;
+        while (PeekNamedPipe(rd, nullptr, 0, nullptr, &avail, nullptr) && avail > 0) {
+            DWORD to_read = avail > static_cast<DWORD>(chunk.size())
+                                ? static_cast<DWORD>(chunk.size()) : avail;
+            DWORD n = 0;
+            if (!ReadFile(rd, chunk.data(), to_read, &n, nullptr) || n == 0) break;
+            buf.append(chunk.data(), n);
+            if (console != INVALID_HANDLE_VALUE) {
+                DWORD written = 0;
+                (void)WriteFile(console, chunk.data(), n, &written, nullptr);
+            }
+            avail -= n;
+        }
+
+        // Check whether the process has exited.
+        DWORD code = 0;
+        if (GetExitCodeProcess(pi.hProcess, &code) && code != STILL_ACTIVE) {
+            // One final drain to catch the last bytes.
+            for (;;) {
+                DWORD n = 0;
+                if (!ReadFile(rd, chunk.data(), static_cast<DWORD>(chunk.size()), &n, nullptr) || n == 0)
+                    break;
+                buf.append(chunk.data(), n);
+            }
+            result.exit_code = static_cast<int>(code);
+            break;
+        }
+
+        if (std::chrono::steady_clock::now() >= deadline) {
+            timed_out = true;
+            TerminateProcess(pi.hProcess, 1);
+            break;
+        }
+        Sleep(10);
+    }
+
+    CloseHandle(rd);
+    if (console != INVALID_HANDLE_VALUE) CloseHandle(console);
+    CloseHandle(pi.hProcess);
+
+    if (timed_out) {
+        result.timed_out = true;
+        buf += std::format("\n[tool: timed out after {}s, killed]\n", timeout_seconds);
+    }
+    result.output = std::move(buf);
+    return result;
+}
+
+#else  // ── POSIX (Linux / Android) ────────────────────────────────────
 
 inline ShellResult run_shell(std::string_view cmd, const fs::path& cwd, int timeout_seconds) {
     int pipefd[2];
@@ -200,6 +332,8 @@ inline ShellResult run_shell(std::string_view cmd, const fs::path& cwd, int time
     result.output = std::move(buf);
     return result;
 }
+
+#endif  // _WIN32
 
 // ── Tool schema definitions ──────────────────────────────────────────
 // Each tool is exposed to the LLM via OpenAI function-calling format.
@@ -1780,28 +1914,55 @@ inline std::string execute(const std::string& name, std::string_view arguments,
 
             if (!allow_external) {
                 // ── Pre-scan: detect attempts to access paths outside workspace ──
+#ifndef _WIN32
                 static const std::vector<std::string> system_prefixes = {
                     "/etc/", "/sdcard/", "/storage/", "/system/", "/proc/", "/sys/",
                     "/dev/", "/mnt/", "/vendor/", "/product/", "/odm/", "/oem/",
                     "/data/local/", "/data/misc/", "/sdcard/", "/storage/emulated/",
                 };
+#endif
+                // Test whether a token looks like an absolute filesystem path.
+                // POSIX: starts with '/'.  Windows: drive letter (C:\) or
+                // backslash-prefixed (absolute / UNC) path.
+#ifdef _WIN32
+                auto is_abs = [](std::string_view p) {
+                    if (p.size() >= 3 &&
+                        ((p[0] >= 'A' && p[0] <= 'Z') || (p[0] >= 'a' && p[0] <= 'z')) &&
+                        p[1] == ':' && (p[2] == '\\' || p[2] == '/')) return true;
+                    if (p.size() >= 2 && p[0] == '\\' && p[1] == '\\') return true;
+                    if (p.size() >= 1 && p[0] == '\\') return true;
+                    return false;
+                };
+#else
+                auto is_abs = [](std::string_view p) { return p.size() > 1 && p[0] == '/'; };
+#endif
+
                 std::string root_str = root.string();
                 std::string root_prefix = root_str;
-                if (!root_prefix.empty() && root_prefix.back() != '/') root_prefix += '/';
+#ifdef _WIN32
+                char sep = '\\';
+#else
+                char sep = '/';
+#endif
+                if (!root_prefix.empty() && root_prefix.back() != sep) root_prefix += sep;
 
                 std::string blocked_path;
                 auto check_path = [&](std::string_view path_candidate) {
-                    if (blocked_path.empty() && path_candidate.size() > 1 &&
-                        path_candidate[0] == '/') {
+                    if (blocked_path.empty() && is_abs(path_candidate)) {
                         std::string pc(path_candidate);
                         // Allow paths that are exactly the workspace root
-                        // (with or without trailing slash).
-                        if (pc == root_str || pc == (root_str + "/")) return;
+                        // (with or without trailing separator).
+                        if (pc == root_str || pc == (root_str + sep)) return;
                         if (pc.starts_with(root_prefix)) return;
+#ifdef _WIN32
+                        // Windows: any absolute path outside the workspace is blocked.
+                        blocked_path = pc;
+#else
                         for (const auto& sp : system_prefixes) {
                             if (pc.starts_with(sp)) { blocked_path = pc; return; }
                         }
                         if (!pc.starts_with(root_prefix)) blocked_path = pc;
+#endif
                     }
                 };
 
@@ -1818,9 +1979,9 @@ inline std::string execute(const std::string& name, std::string_view arguments,
                     size_t gt_pos = token.find('>');
                     if (gt_pos != std::string::npos) {
                         std::string after_gt = token.substr(gt_pos + 1);
-                        if (!after_gt.empty() && after_gt[0] == '/') check_path(after_gt);
+                        if (is_abs(after_gt)) check_path(after_gt);
                     }
-                    if (prev_was_path_cmd && clean.size() > 1 && clean[0] == '/')
+                    if (prev_was_path_cmd && is_abs(clean))
                         check_path(clean);
                     prev_was_path_cmd = (token == "cd" || token == "ls" || token == "cat" ||
                         token == "rm" || token == "cp" || token == "mv" ||
@@ -1831,7 +1992,7 @@ inline std::string execute(const std::string& name, std::string_view arguments,
                         token == "awk" || token == "head" || token == "tail" ||
                         token == "less" || token == "more" || token == "nano" ||
                         token == "vim" || token == "vi" || token == "stat");
-                    if (clean.size() > 1 && clean[0] == '/') check_path(clean);
+                    if (is_abs(clean)) check_path(clean);
                 }
 
                 if (!blocked_path.empty()) {

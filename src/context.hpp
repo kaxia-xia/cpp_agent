@@ -15,6 +15,7 @@
 #pragma once
 
 #include "llm.hpp"
+#include "platform.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -146,7 +147,7 @@ private:
         auto now = std::chrono::system_clock::now();
         std::time_t t = std::chrono::system_clock::to_time_t(now);
         std::tm tm{};
-        localtime_r(&t, &tm);
+        platform::localtime_portable(&t, &tm);
         char buf[16];
         std::strftime(buf, sizeof(buf), "%H:%M:%S", &tm);
         return std::string(buf);
