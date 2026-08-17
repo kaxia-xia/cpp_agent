@@ -304,7 +304,7 @@ std::string snap_label(const std::string& prompt) {
     if (a == std::string::npos) return "turn";
     auto b = first.find_last_not_of(" \t\r");
     first = first.substr(a, b - a + 1);
-    if (first.size() > 40) first = first.substr(0, 40) + "...";
+    if (first.size() > 40) first = git::utf8_truncate(first, 40);
     return first;
 }
 

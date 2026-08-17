@@ -1818,46 +1818,50 @@ inline std::string execute(const std::string& name, std::string_view arguments,
                 std::ifstream f(resolved);
                 if (!f) return std::format("[error: cannot open: {}]", resolved.string());
 
-                std::vector<std::string> all_lines;
+                size_t max_bytes = static_cast<size_t>(std::max(1024, get_int("max_bytes", 200000)));
+                size_t from = static_cast<size_t>(start_line - 1);  // 0-based
+                size_t to = (end_line > 0) ? static_cast<size_t>(end_line)
+                                           : static_cast<size_t>(-1);
+                std::ostringstream ss;
+                size_t bytes_written = 0;
+                bool truncated = false;
+                size_t total_lines = 0;
+                size_t line_no = 0;
                 std::string line;
+
+                // Stream the file instead of loading every line into memory.
+                // Only the lines within [from, to) are kept; everything else
+                // is skipped (and total_lines is still counted exactly).
                 while (std::getline(f, line)) {
-                    all_lines.push_back(line);
+                    bool in_range = (line_no >= from) && (line_no < to);
+                    if (!truncated && in_range) {
+                        std::string ln = line + '\n';
+                        if (bytes_written + ln.size() > max_bytes) {
+                            truncated = true;  // stop emitting, keep counting lines
+                        } else {
+                            ss << ln;
+                            bytes_written += ln.size();
+                        }
+                    }
+                    ++line_no;
                 }
-                size_t total_lines = all_lines.size();
+                total_lines = line_no;
 
                 if (start_line > static_cast<int>(total_lines)) {
                     return std::format("[error: start_line {} exceeds file length ({} lines)]",
                                        start_line, total_lines);
                 }
 
-                size_t from = static_cast<size_t>(start_line - 1);  // 0-based
-                size_t to = (end_line > 0) ? static_cast<size_t>(end_line) : total_lines;
-                if (to > total_lines) to = total_lines;
-
-                size_t max_bytes = static_cast<size_t>(std::max(1024, get_int("max_bytes", 200000)));
-                std::ostringstream ss;
-                size_t bytes_written = 0;
-                bool truncated = false;
-
-                for (size_t i = from; i < to; ++i) {
-                    std::string ln = all_lines[i] + '\n';
-                    if (bytes_written + ln.size() > max_bytes) {
-                        truncated = true;
-                        break;
-                    }
-                    ss << ln;
-                    bytes_written += ln.size();
-                }
+                size_t shown_end = (end_line > 0)
+                    ? std::min(static_cast<size_t>(end_line), total_lines)
+                    : total_lines;
 
                 if (truncated) {
                     ss << std::format("[... truncated at {} bytes, showing lines {}-{} of {}]\n",
-                                      max_bytes, start_line,
-                                      static_cast<int>(from + (to - from)), total_lines);
+                                      max_bytes, start_line, shown_end, total_lines);
                 } else {
                     ss << std::format("[showing lines {}-{} of {}]\n",
-                                      start_line,
-                                      (end_line > 0 && end_line <= static_cast<int>(total_lines)) ? end_line : static_cast<int>(total_lines),
-                                      total_lines);
+                                      start_line, shown_end, total_lines);
                 }
                 return ss.str();
             }

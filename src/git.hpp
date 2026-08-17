@@ -109,6 +109,20 @@ inline std::string trim(std::string_view s) {
     return std::string(s.substr(a, b - a + 1));
 }
 
+// Truncate a UTF-8 string to at most max_bytes without splitting a
+// multi-byte character.  Naive byte-based substr() can cut a Chinese (or
+// emoji) code point in half and produce mojibake in commit messages / labels.
+inline std::string utf8_truncate(std::string_view s, size_t max_bytes) {
+    if (s.size() <= max_bytes) return std::string(s);
+    size_t end = max_bytes;
+    // Walk backwards over UTF-8 continuation bytes (0b10xxxxxx) so the cut
+    // lands on a code-point boundary (an ASCII byte or a multi-byte lead byte).
+    while (end > 0 && (static_cast<unsigned char>(s[end]) & 0xC0) == 0x80) {
+        --end;
+    }
+    return std::string(s.substr(0, end)) + "...";
+}
+
 // ── public API ───────────────────────────────────────────────────────
 
 // Check whether `git` is available on PATH. Returns true if found.
@@ -257,8 +271,9 @@ inline std::string commit_changes(const fs::path& root, std::string_view label,
 
     // Build a descriptive commit message.
     std::string msg = std::format("agent: {}", label);
-    // Truncate to a reasonable length.
-    if (msg.size() > 80) msg = msg.substr(0, 80) + "...";
+    // Truncate to a reasonable length (UTF-8 safe, so Chinese text is not
+    // split mid-character).
+    if (msg.size() > 80) msg = utf8_truncate(msg, 80);
 
     // Use shell-quoted message with -m to handle special characters safely.
     auto [rc_cm, out_cm] = run_git(root,

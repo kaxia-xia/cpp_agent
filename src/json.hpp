@@ -377,15 +377,49 @@ private:
                     case 'r':  out.push_back('\r'); break;
                     case 't':  out.push_back('\t'); break;
                     case 'u': {
-                        if (pos_ + 4 > src_.size()) fail("bad unicode escape");
-                        unsigned cp = 0;
-                        auto hex = [](char ch) -> unsigned {
+                        auto hex_val = [](char ch) -> int {
                             if (ch >= '0' && ch <= '9') return ch - '0';
                             if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
                             if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
-                            return 0;
+                            return -1;
                         };
-                        for (int i = 0; i < 4; ++i) cp = (cp << 4) | hex(src_[pos_++]);
+                        auto read_hex4 = [&](size_t p, unsigned& out) -> bool {
+                            if (p + 4 > src_.size()) return false;
+                            unsigned v = 0;
+                            for (int i = 0; i < 4; ++i) {
+                                int h = hex_val(src_[p + i]);
+                                if (h < 0) return false;
+                                v = (v << 4) | static_cast<unsigned>(h);
+                            }
+                            out = v;
+                            return true;
+                        };
+
+                        unsigned cp = 0;
+                        if (!read_hex4(pos_, cp)) fail("bad unicode escape");
+                        pos_ += 4;
+
+                        // Handle UTF-16 surrogate pairs (\uD83D\uDE00 = 😀).
+                        // A high surrogate must be followed by a low surrogate
+                        // and both combine into a single code point.  A lone
+                        // surrogate is invalid JSON; emit U+FFFD so the result
+                        // is always valid UTF-8.
+                        if (cp >= 0xD800 && cp <= 0xDBFF) {
+                            unsigned lo = 0;
+                            if (pos_ + 1 < src_.size() && src_[pos_] == '\\' &&
+                                src_[pos_ + 1] == 'u' && read_hex4(pos_ + 2, lo) &&
+                                lo >= 0xDC00 && lo <= 0xDFFF) {
+                                pos_ += 6;  // consume the \uXXXX low surrogate
+                                cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                            } else {
+                                encode_utf8(out, 0xFFFD);
+                                break;
+                            }
+                        } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
+                            encode_utf8(out, 0xFFFD);
+                            break;
+                        }
+
                         encode_utf8(out, cp);
                         break;
                     }
