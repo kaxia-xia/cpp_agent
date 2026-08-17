@@ -17,6 +17,52 @@
 
 ---
 
+## 🚀 三平台快速安装速查
+
+> 三台设备对应三种工具链，各自只需「装依赖 → 编译 → 安装」三步。下方命令是**最小可用集**，完整说明与可选工具依赖见下文各节。
+
+### 📱 Android Termux
+
+```bash
+pkg update && pkg install clang cmake libcurl git libandroid-spawn
+# 可选：agent 工具依赖（按需）
+pkg install python tesseract ffmpeg termux-api
+
+cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build
+cmake --install build          # 装到 ~/.local/bin
+```
+
+### 🐧 ARM64 / x64 Linux（Ubuntu / Debian）
+
+```bash
+sudo apt update && sudo apt install cmake g++ libcurl4-openssl-dev git
+# ⚠️ g++ 必须 ≥ 13（Ubuntu 22.04 默认是 11，会编译失败），详见「普通 Linux」一节
+
+cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build
+cmake --install build          # 装到 ~/.local/bin
+```
+
+### 🪟 Windows 10 x64（WinLibs MinGW-w64，推荐）
+
+```cmd
+:: 1. 下载 WinLibs GCC x64 UCRT 便携版，解压到 C:\mingw64，把 C:\mingw64\bin 加入 PATH
+:: 2. 安装 CMake 与 Ninja 并加入 PATH
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+cmake --install build
+```
+
+### 🔑 三平台通用的运行前设置
+
+```bash
+export DEEPSEEK_API_KEY="sk-..."     # DeepSeek
+# 或 export ZHIPU_API_KEY="..."       # 智谱 GLM
+
+coding-agent                          # 安装后直接运行（或 ./build/coding-agent）
+```
+
+---
+
 ## ✨ 功能特性
 
 ### 🤖 自主 Agent 循环
@@ -434,10 +480,22 @@ sudo apt update
 sudo apt install cmake g++ libcurl4-openssl-dev git
 ```
 
-> **编译器说明**：项目需要 **C++20** 支持。
-> - **GCC 13+**
+> **编译器说明**：项目需要 **C++20** 支持，且大量使用 `std::format`（GCC 13 才完整支持，否则会报 `std::format` 未定义的编译错误）。
+> - **GCC 13+**（CMake 会自动检测可用编译器）
 >
-> CMake 会自动检测可用编译器。
+> ⚠️ **GCC 版本注意**：
+> - **Ubuntu 24.04+ / Debian 13+ / Fedora** 默认自带 GCC 13+，直接 `apt install g++` 即可。
+> - **Ubuntu 22.04 默认是 GCC 11，会编译失败**。可手动安装新版本并设为默认：
+>
+> ```bash
+> sudo apt install gcc-13 g++-13
+> sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 100
+> sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100
+> # 若报"找不到 gcc-13 包"，需先添加 toolchain PPA：
+> #   sudo add-apt-repository ppa:ubuntu-toolchain-r/test && sudo apt update
+> ```
+>
+> > 💡 ARM64 与 x64 的安装命令**完全相同**，无需任何额外配置。
 
 ### 2️⃣ Agent 工具依赖（按需安装）
 
