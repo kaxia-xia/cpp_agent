@@ -304,6 +304,9 @@ std::string snap_label(const std::string& prompt) {
     if (a == std::string::npos) return "turn";
     auto b = first.find_last_not_of(" \t\r");
     first = first.substr(a, b - a + 1);
+    // Strip secrets (passwords/keys/tokens) BEFORE truncating, so a secret
+    // can never survive into a git commit message or snapshot label.
+    first = git::redact_sensitive(first);
     if (first.size() > 40) first = git::utf8_truncate(first, 40);
     return first;
 }

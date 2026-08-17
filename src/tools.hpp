@@ -1973,10 +1973,17 @@ inline std::string execute(const std::string& name, std::string_view arguments,
             if (!allow_external) {
                 // ── Pre-scan: detect attempts to access paths outside workspace ──
 #ifndef _WIN32
+                // Sensitive system / user-data directories that a command must
+                // not touch without explicit approval.  Note: /dev, /proc and
+                // /sys are deliberately NOT listed — they are read-only device /
+                // process info that legitimate commands read constantly
+                // (e.g. /dev/null redirection, /proc/cpuinfo).  Blocking them
+                // produced too many false positives (//, /dev/stdin, sed regexes,
+                // system command paths, etc.).
                 static const std::vector<std::string> system_prefixes = {
-                    "/etc/", "/sdcard/", "/storage/", "/system/", "/proc/", "/sys/",
-                    "/dev/", "/mnt/", "/vendor/", "/product/", "/odm/", "/oem/",
-                    "/data/local/", "/data/misc/", "/sdcard/", "/storage/emulated/",
+                    "/etc/", "/sdcard/", "/storage/", "/system/", "/mnt/",
+                    "/vendor/", "/product/", "/odm/", "/oem/",
+                    "/data/local/", "/data/misc/", "/storage/emulated/",
                 };
 #endif
                 // Test whether a token looks like an absolute filesystem path.
@@ -2016,10 +2023,24 @@ inline std::string execute(const std::string& name, std::string_view arguments,
                         // Windows: any absolute path outside the workspace is blocked.
                         blocked_path = pc;
 #else
+                        // POSIX: only block explicitly listed sensitive
+                        // directories.  Everything else (including the rest of
+                        // $HOME outside the workspace) is left to the caller's
+                        // judgment — run_command is a shell, not a hard sandbox.
                         for (const auto& sp : system_prefixes) {
-                            if (pc.starts_with(sp)) { blocked_path = pc; return; }
+                            std::string_view prefix(sp);
+                            if (!prefix.empty() && prefix.back() == '/')
+                                prefix.remove_suffix(1);
+                            // Match the directory itself ("/sdcard") or any
+                            // path beneath it ("/sdcard/DCIM").
+                            if (pc == prefix) { blocked_path = pc; return; }
+                            if (pc.size() > prefix.size() &&
+                                pc.compare(0, prefix.size(), prefix) == 0 &&
+                                pc[prefix.size()] == '/') {
+                                blocked_path = pc;
+                                return;
+                            }
                         }
-                        if (!pc.starts_with(root_prefix)) blocked_path = pc;
 #endif
                     }
                 };

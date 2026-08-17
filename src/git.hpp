@@ -123,6 +123,77 @@ inline std::string utf8_truncate(std::string_view s, size_t max_bytes) {
     return std::string(s.substr(0, end)) + "...";
 }
 
+// ── Sensitive info redaction ─────────────────────────────────────────
+// Commit messages and snapshot labels are derived from the user's prompt.
+// A prompt may contain secrets (passwords, API keys, phone numbers) and
+// writing those verbatim into git history is a permanent, public leak —
+// exactly what happened with a sudo password.  Strip known patterns before
+// anything is committed.
+//
+// The heuristics are deliberately conservative: they only remove the value
+// immediately following an explicit secret keyword, so ordinary task
+// descriptions ("fix the password-reset bug") are left untouched.
+inline std::string redact_sensitive(std::string_view s) {
+    std::string out(s);
+
+    // Longest keywords first so we never partially match ("password" before
+    // any shorter form).
+    static const std::vector<std::string_view> kKeywords = {
+        "api_key", "apikey", "api-key", "api key",
+        "password", "passwd", "secret", "token",
+        "密码", "口令", "密钥",
+    };
+
+    // Connector: appears between a keyword and its value, signalling that the
+    // following text IS the secret ("密码是 xxx", "password: xxx", "token=xxx").
+    auto connector_len = [&](size_t idx) -> size_t {
+        if (idx >= out.size()) return 0;
+        unsigned char c = static_cast<unsigned char>(out[idx]);
+        if (c == ':' || c == '=' || c == ' ' || c == '\t') return 1;
+        static const std::vector<std::string_view> kCjk = {"是", "为"};
+        for (std::string_view cj : kCjk) {
+            if (out.compare(idx, cj.size(), cj) == 0) return cj.size();
+        }
+        return 0;
+    };
+
+    // Value delimiter: marks the end of the secret value.
+    auto delim_len = [&](size_t idx) -> size_t {
+        if (idx >= out.size()) return 0;
+        unsigned char c = static_cast<unsigned char>(out[idx]);
+        if (c == ' ' || c == ',' || c == ';' || c == '.' ||
+            c == '\n' || c == '\r' || c == ':' || c == '=') return 1;
+        static const std::vector<std::string_view> kCjk = {"。", "；", "，", "的"};
+        for (std::string_view cj : kCjk) {
+            if (out.compare(idx, cj.size(), cj) == 0) return cj.size();
+        }
+        return 0;
+    };
+
+    for (std::string_view kw : kKeywords) {
+        size_t pos = 0;
+        while ((pos = out.find(kw, pos)) != std::string::npos) {
+            size_t q = pos + kw.size();
+            // Only treat the following text as a secret if a connector is
+            // present.  This avoids mangling ordinary phrases like
+            // "密码重置" (no connector) while still catching "密码是 xxx".
+            bool has_connector = false;
+            while (size_t n = connector_len(q)) { has_connector = true; q += n; }
+            if (has_connector) {
+                size_t vend = q;
+                while (vend < out.size() && delim_len(vend) == 0) ++vend;
+                if (vend > q) {
+                    out.replace(q, vend - q, "[redacted]");
+                    pos = q + 10;   // skip past "[redacted]"
+                    continue;
+                }
+            }
+            pos += kw.size();       // no connector / no value — skip keyword
+        }
+    }
+    return out;
+}
+
 // ── public API ───────────────────────────────────────────────────────
 
 // Check whether `git` is available on PATH. Returns true if found.
