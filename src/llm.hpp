@@ -29,7 +29,7 @@ struct Provider {
 
 inline std::vector<Provider> known_providers() {
     return {
-        Provider{"deepseek", "https://api.deepseek.com/v1", "DEEPSEEK_API_KEY", "deepseek-v4-pro", "DeepSeek"},
+        Provider{"deepseek", "https://api.deepseek.com/v1", "DEEPSEEK_API_KEY", "deepseek-v4-flash", "DeepSeek"},
         Provider{"glm", "https://open.bigmodel.cn/api/paas/v4", "ZHIPU_API_KEY", "glm-4-flash", "Zhipu GLM"},
     };
 }
