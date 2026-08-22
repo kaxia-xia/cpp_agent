@@ -38,7 +38,7 @@ cmake --install build          # 装到 ~/.local/bin
 sudo apt update && sudo apt install cmake g++ libcurl4-openssl-dev git
 # ⚠️ g++ 必须 ≥ 13（Ubuntu 22.04 默认是 11，会编译失败），详见「普通 Linux」一节
 
-cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS_RELEASE="-O2 -DNDEBUG" && cmake --build build  # -O2 替代默认 -O3，避免小内存设备（如香橙派）编译时内存耗尽卡死
 cmake --install build          # 装到 ~/.local/bin
 ```
 
@@ -528,8 +528,8 @@ pip install Pillow qrcode pyzbar matplotlib
 ### 3️⃣ 编译与安装
 
 ```bash
-# 在项目根目录执行（与 Termux 完全相同）
-cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build
+# 在项目根目录执行（低内存设备用 -O2 替代 -O3，避免编译卡死；内存充足的设备可去掉 CXX_FLAGS 参数）
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS_RELEASE="-O2 -DNDEBUG" && cmake --build build  # -O2 替代默认 -O3，避免小内存设备（如香橙派）编译时内存耗尽卡死
 ```
 
 编译产物为 `build/coding-agent`。
